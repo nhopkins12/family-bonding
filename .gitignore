@@ -10,8 +10,24 @@ node_modules
 dist
 dist-ssr
 
-# Amplify sandbox local cache/generated files
+# Amplify sandbox local cache/generated files, and the client config it
+# regenerates on every deploy (endpoints/pool IDs, not secrets, but there's
+# no reason to version a file that's always about to be overwritten by CI).
 .amplify
+amplify_outputs*
+amplifyconfiguration*
+
+# TypeScript incremental build cache — machine-local, constantly changing
+*.tsbuildinfo
+
+# Copied from node_modules/dictionary-en by scripts/copy-dictionary.js's postinstall
+# hook on every install — no reason to version a straight copy of a dependency's files.
+public/dictionaries
+
+# Env files — never commit real credentials
+.env
+.env.local
+.env.*.local
 
 # Editor
 .vscode/*

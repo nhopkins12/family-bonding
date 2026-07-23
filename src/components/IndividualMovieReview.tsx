@@ -1,5 +1,6 @@
 import { useAppData } from '../state/AppDataContext'
 import { SUBRATING_KEYS } from '../types'
+import { ModalBackdrop } from './ModalBackdrop'
 import { PosterImage } from './PosterImage'
 import { ScoreRow } from './MovieDetailModal'
 
@@ -21,7 +22,7 @@ export function IndividualMovieReview({ ownerId, movieId, onClose }: IndividualM
   if (!movie) return null
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClose={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
           Close
@@ -65,6 +66,6 @@ export function IndividualMovieReview({ ownerId, movieId, onClose }: IndividualM
           </>
         )}
       </div>
-    </div>
+    </ModalBackdrop>
   )
 }

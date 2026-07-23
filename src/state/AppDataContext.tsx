@@ -15,6 +15,7 @@ interface AppDataContextValue {
   moviesLoading: boolean
   isSignedIn: boolean
   myDisplayName: string
+  myUsername: string
   isAdmin: boolean
   renameMe: (name: string) => Promise<void>
   rankedIds: string[]
@@ -34,6 +35,14 @@ function deriveDefaultName(loginId?: string): string {
   if (!loginId) return 'Me'
   const localPart = loginId.split('@')[0]
   return localPart.charAt(0).toUpperCase() + localPart.slice(1)
+}
+
+// The immutable handle, as opposed to deriveDefaultName's capitalized version — this is
+// what create-member/handler.ts actually slugified into the Cognito login, so it's what
+// stays true even after someone customizes their displayName.
+function deriveUsername(loginId?: string): string {
+  if (!loginId) return 'me'
+  return loginId.split('@')[0]
 }
 
 export function AppDataProvider({
@@ -132,7 +141,7 @@ export function AppDataProvider({
     if (!userId || myProfile || hasAttemptedProfileCreate.current) return
     if (profiles.length === 0 && moviesLoading) return // wait for first sync to avoid a duplicate race
     hasAttemptedProfileCreate.current = true
-    client.models.AppUser.create({ displayName: deriveDefaultName(loginId) }).catch((err) => {
+    client.models.AppUser.create({ displayName: deriveDefaultName(loginId), username: deriveUsername(loginId) }).catch((err) => {
       console.error('Failed to auto-provision profile', err)
       hasAttemptedProfileCreate.current = false
     })
@@ -267,6 +276,7 @@ export function AppDataProvider({
       moviesLoading,
       isSignedIn,
       myDisplayName: myProfile?.displayName ?? deriveDefaultName(loginId),
+      myUsername: myProfile?.username ?? deriveUsername(loginId),
       isAdmin,
       renameMe,
       rankedIds,

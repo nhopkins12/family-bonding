@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Futura Black';
+  src: url('./assets/fonts/futura-black.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #f7f2e3;
   --bg-elevated: #fffcf5;
@@ -238,9 +246,28 @@ h3 {
 }
 
 .app-header h1 {
-  font-size: 1.4rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  /* The real thing now (see the @font-face above) — Cinzel was only ever a stand-in for
+     while it was still a commercial font with no source to embed. font-weight stays 400
+     (the file's own, only, actual weight): asking for a heavier synthetic weight on top
+     of an already-black display face just distorts it, browsers can't invent strokes
+     that aren't in the file. Letter-spacing is deliberately generous — Futura Black's
+     glyphs are dense enough that tight tracking reads as adjacent letters overlapping
+     rather than a word, and the wide tracking is true to how title cards actually set
+     display faces like this. margin/line-height reset to 1 since the font's own internal
+     metrics leave noticeably more headroom above the caps than a normal text face,
+     which was throwing off vertical-centering against the account menu next to it. */
+  font-family: 'Futura Black', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 1.85rem;
+  font-weight: 400;
+  line-height: 1;
+  margin: 0;
+  /* Small measured nudge on top of the line-height/margin reset above — verified against
+     the account button's actual rendered pixels (not just font metrics, which this
+     particular TTF reports inconsistently), so this is tuned to what's really on screen. */
+  position: relative;
+  top: 4px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--text);
 }
 
@@ -359,9 +386,24 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
+.account-profile-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
 .account-profile-name {
   font-weight: 600;
   font-size: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-profile-username {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -395,18 +437,27 @@ h3 {
 }
 
 /* Page navigation (My Rankings is its own page, not a tab) */
+/* Matches .modal-close/.modal-back's pill-button language instead of a bare text
+   link — it's the same "go back" action, so it should look like the other ones. */
 .page-back-link {
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--text-muted);
   font-size: var(--text-sm);
-  padding: 0 0 var(--space-3);
+  font-weight: 600;
+  padding: 0.35rem var(--space-4);
+  margin-bottom: var(--space-4);
   min-height: unset;
 }
 
 .page-back-link:hover:not(:disabled) {
   color: var(--accent-dim);
-  border-color: transparent;
+  border-color: var(--accent-dim);
+  background: var(--bg-hover);
 }
 
 .page-title {
@@ -656,6 +707,15 @@ h3 {
   cursor: grabbing;
 }
 
+/* The floating clone rendered in <DragOverlay> — the thing that actually follows the
+   pointer. Its own list slot (see DraggableMovieRow) fades to a faint placeholder
+   instead, so there's one clear "lifted" card rather than two competing copies. */
+.movie-card-overlay {
+  cursor: grabbing;
+  transform: scale(1.03);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
 .rank-badge {
   min-width: 1.9rem;
   text-align: center;
@@ -753,8 +813,23 @@ h3 {
   background: var(--bg-hover);
 }
 
+.member-card-identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .member-card-name {
   font-weight: 600;
+}
+
+.member-card-username {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-card-stat {
@@ -1003,14 +1078,118 @@ h3 {
   color: var(--danger);
 }
 
-/* Grows with content instead of scrolling internally or being manually drag-resized —
-   see AutoResizeTextarea.tsx. Caps out so one very long review can't blow out the modal. */
-.autoresize-textarea {
-  resize: none;
-  overflow-y: auto;
+/* AutoResizeTextarea: a real <textarea> (invisible text) stacked on a <div> "backdrop"
+   (the actually-visible glyphs, with squiggly-underlined spans for misspelled words) —
+   see the component for the full rationale. The wrapper grows with content instead of
+   scrolling internally or being manually drag-resized; caps out so one very long review
+   can't blow out the modal. Both surface layers below share every box-model property
+   explicitly (not inherited from a bare `textarea` tag selector) so the div and the
+   textarea end up pixel-identical — any drift here shows up as underlines/text not
+   lining up with what's actually typed. */
+.autoresize-textarea-wrap {
+  position: relative;
   min-height: 7rem;
   max-height: 22rem;
+}
+
+.autoresize-textarea {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-base);
   line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+}
+
+.autoresize-textarea-backdrop {
+  pointer-events: none;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.autoresize-textarea-input {
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.autoresize-textarea-input::selection {
+  background: var(--accent-soft);
+}
+
+.spellcheck-issue {
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+.spellcheck-issue-spelling {
+  text-decoration-color: var(--danger);
+}
+
+/* Blue for grammar, same convention as Google Docs — reads fine on both themes without
+   needing separate light/dark tuning, unlike most of this palette's other colors. */
+.spellcheck-issue-grammar {
+  text-decoration-color: #4c8fd6;
+}
+
+.spellcheck-popover-message {
+  max-width: 16rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
+}
+
+.spellcheck-popover {
+  position: absolute;
+  z-index: 10;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 8rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.spellcheck-popover-item {
+  text-align: left;
+  background: none;
+  border: none;
+  min-height: unset;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.spellcheck-popover-item:hover {
+  background: var(--bg-hover);
+}
+
+.spellcheck-popover-ignore {
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+.spellcheck-popover-empty {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  margin: 0;
 }
 
 .subrating-grid {
@@ -1019,13 +1198,190 @@ h3 {
   gap: var(--space-3);
 }
 
+.review-text-field-actions {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.review-expand-toggle {
+  min-height: unset;
+  padding: 0.2rem var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.review-expand-toggle:hover {
+  color: var(--accent-dim);
+  border-color: var(--accent-dim);
+}
+
+/* Focused writing popup — a dedicated overlay above the review modal (not the modal
+   itself grown), so expanding makes the textarea the only thing on screen instead of
+   just giving it more room alongside everything else. Sliders are deliberately absent
+   here rather than shrunk down; see MyReviewModal.tsx. */
+.write-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(15, 15, 15, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  .write-overlay-backdrop {
+    background: rgba(0, 0, 0, 0.75);
+  }
+}
+
+/* opening/closing get the animation; the settled 'open' phase deliberately has none —
+   the keyframes' own `both` fill-mode already left it at this exact end state, so
+   dropping the animation there causes no visual jump. */
+.write-overlay-backdrop-opening {
+  animation: write-overlay-backdrop-in 0.2s ease-out both;
+}
+
+.write-overlay-backdrop-closing {
+  animation: write-overlay-backdrop-out 0.2s ease-in both;
+}
+
+@keyframes write-overlay-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes write-overlay-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.write-overlay-panel {
+  width: 95vw;
+  height: 92vh;
+  max-width: 95vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-md);
+}
+
+.write-overlay-backdrop-opening .write-overlay-panel {
+  animation: write-overlay-panel-in 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.write-overlay-backdrop-closing .write-overlay-panel {
+  animation: write-overlay-panel-out 0.2s ease-in both;
+}
+
+@keyframes write-overlay-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes write-overlay-panel-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+}
+
+.write-overlay-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+
+.write-overlay-title {
+  font-weight: 600;
+}
+
+.write-overlay-textarea {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
 /* Slider rows */
 .subrating-row {
   display: grid;
-  grid-template-columns: 11rem 1fr 2rem;
+  grid-template-columns: 11rem 1fr 2rem 1.5rem;
   align-items: center;
   gap: var(--space-3);
   font-size: var(--text-base);
+}
+
+/* Drawn from two rotated bars rather than an "×" glyph — glyph metrics for × sit
+   noticeably above a font's true vertical center (aligned to sit with math operators
+   like + and −, not centered in the full line box), so flex-centering the character
+   itself still reads as visibly off-center. Fixed-size bars centered by absolute
+   positioning have no such bias. */
+.subrating-row-clear {
+  position: relative;
+  min-height: unset;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: 50%;
+}
+
+.subrating-row-clear::before,
+.subrating-row-clear::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.65rem;
+  height: 1.5px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.subrating-row-clear::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.subrating-row-clear:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--bg-hover);
+  border-color: transparent;
+}
+
+.subrating-row-clear:disabled {
+  visibility: hidden;
 }
 
 .subrating-row-label {
@@ -1191,6 +1547,13 @@ h3 {
   border-color: var(--accent-solid-hover);
 }
 
+.admin-form-hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin-top: calc(-1 * var(--space-2));
+  max-width: 420px;
+}
+
 .admin-form-error {
   color: var(--danger);
   font-size: var(--text-sm);
@@ -1284,7 +1647,15 @@ h3 {
   position: fixed;
   top: 0;
   left: 50%;
+  /* 100vh on mobile includes the area hidden behind the browser's collapsible
+     address bar, which is taller than the actually-visible viewport right after
+     a fresh page load (when that bar is still expanded) — the barrel image would
+     render taller than the visible screen, and since it's top-anchored, that
+     surplus most visibly showed up as a gap of plain background above it. 100dvh
+     tracks the real visible viewport instead; the plain 100vh stays first as a
+     fallback for browsers that don't support dvh yet. */
   height: 100vh;
+  height: 100dvh;
   width: auto;
   z-index: 3;
   transform-origin: 790.97vh 50%;
@@ -1316,28 +1687,54 @@ h3 {
   }
 }
 
-/* Blood-wipe transition — standalone, not wired into any flow yet. Real drip
-   overlay artwork wipes down from the top via a clip-path reveal and covers
-   the screen; background-position:bottom keeps the drippy leading edge at the
-   bottom of the viewport rather than showing the flat top of the source art. */
+/* Blood-wipe page transition (see App.tsx) — the source art (blood.webp) is a
+   solid drip silhouette at the TOP fading into long drip tendrils hanging down,
+   so background-position:top is what actually puts those tendrils where real
+   drips belong: hanging from the top edge of the screen, not a flat line. The
+   reveal grows the visible region down from a sliver at the top (clip-path's
+   bottom-inset shrinking from 100% to 0) so it genuinely falls from the top
+   rather than rising up off the bottom like a regular wipe. The page underneath
+   swaps while fully covered, then it keeps "falling" — draining off the bottom
+   of the screen (top-inset growing 0 to 100%) — to reveal the new page, so both
+   halves read as one continuous downward flow instead of a reverse-in-place.
+   opacity < 1 keeps it a translucent red wash rather than an opaque block, so
+   the page is still dimly visible dripping past underneath. */
 .blood-wipe {
   position: fixed;
   inset: 0;
   z-index: 999;
   background-color: var(--pop-red);
   background-size: cover;
-  background-position: bottom center;
+  background-position: top center;
   background-repeat: no-repeat;
-  clip-path: inset(100% 0 0 0);
-  animation: blood-wipe-reveal 0.6s ease-in both;
+  opacity: 0.85;
+}
+
+.blood-wipe-covering {
+  clip-path: inset(0 0 100% 0);
+  animation: blood-wipe-reveal 0.9s cubic-bezier(0.6, 0, 0.85, 0.35) both;
+}
+
+.blood-wipe-revealing {
+  clip-path: inset(0 0 0 0);
+  animation: blood-wipe-drain 0.8s cubic-bezier(0.15, 0.65, 0.4, 1) both;
 }
 
 @keyframes blood-wipe-reveal {
   from {
-    clip-path: inset(100% 0 0 0);
+    clip-path: inset(0 0 100% 0);
   }
   to {
     clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes blood-wipe-drain {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(100% 0 0 0);
   }
 }
 

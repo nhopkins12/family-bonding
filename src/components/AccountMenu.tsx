@@ -23,7 +23,7 @@ export function AccountMenu({
   animationsEnabled,
   onSetAnimationsEnabled,
 }: AccountMenuProps) {
-  const { myDisplayName, isAdmin, renameMe } = useAppData()
+  const { myDisplayName, myUsername, isAdmin, renameMe } = useAppData()
   const [open, setOpen] = useState(false)
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(myDisplayName)
@@ -128,11 +128,27 @@ export function AccountMenu({
                       submitName()
                     }}
                   >
-                    <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={submitName} />
+                    <input
+                      autoFocus
+                      aria-label="Display name"
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onBlur={submitName}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
                   </form>
                 ) : (
                   <>
-                    <span className="account-profile-name">{myDisplayName}</span>
+                    <span className="account-profile-identity">
+                      <span className="account-profile-name">{myDisplayName}</span>
+                      {/* The permanent sign-in handle — shown so renaming the display
+                          name above never leaves you unable to recall what you actually
+                          type in the sign-in form. No "Sign in as" label: bold-on-top,
+                          plain-underneath already reads as name/handle without it. */}
+                      <span className="account-profile-username">{myUsername}</span>
+                    </span>
                     <button
                       type="button"
                       className="account-profile-edit"
@@ -142,7 +158,7 @@ export function AccountMenu({
                         setIsEditingName(true)
                       }}
                     >
-                      Edit name
+                      Edit display name
                     </button>
                   </>
                 )}

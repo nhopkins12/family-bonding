@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { useAppData } from '../state/AppDataContext'
 import { computeMovieCategoryAverages } from '../lib/ranking'
-import { INVERTED_SUBRATINGS, SUBRATING_KEYS, SUBRATING_LABELS, type SubratingKey } from '../types'
+import { SUBRATING_KEYS, SUBRATING_LABELS, type SubratingKey } from '../types'
+import { ModalBackdrop } from './ModalBackdrop'
 import { PosterImage } from './PosterImage'
 
 interface MovieDetailModalProps {
@@ -26,7 +27,7 @@ export function MovieDetailModal({ movieId, onClose, onOpenProfile }: MovieDetai
   if (!movie) return null
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClose={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
           Close
@@ -63,7 +64,7 @@ export function MovieDetailModal({ movieId, onClose, onOpenProfile }: MovieDetai
           </section>
         )}
       </div>
-    </div>
+    </ModalBackdrop>
   )
 }
 
@@ -92,14 +93,12 @@ export function ScoreRow({
   summary: { average: number; reviewerCount: number } | null
   hideCount?: boolean
 }) {
-  const isInverted = INVERTED_SUBRATINGS.has(subratingKey)
   const percent = summary ? Math.max(0, Math.min(100, (summary.average / 10) * 100)) : 0
 
   return (
     <div className="score-row">
       <span className="score-row-label">
         <span className="score-row-label-text">{SUBRATING_LABELS[subratingKey]}</span>
-        {isInverted && <span className="inverted-tag">more</span>}
       </span>
       <span className="score-row-track">
         <span className="score-row-fill" style={{ width: `${percent}%` }} />

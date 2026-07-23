@@ -65,6 +65,9 @@ function AppShell({
     setOverlay(null)
     setPage({ kind: 'member-ranking', ownerId })
   }
+  function openMyRankings() {
+    setPage({ kind: 'my-rankings' })
+  }
 
   return (
     <AppDataProvider userId={userId} loginId={loginId} authLoading={authLoading}>
@@ -74,7 +77,7 @@ function AppShell({
           <AccountMenu
             isSignedIn={isSignedIn}
             onOpenAdmin={() => setAdminPanelOpen(true)}
-            onOpenMyRankings={() => setPage({ kind: 'my-rankings' })}
+            onOpenMyRankings={openMyRankings}
             themeOverride={themeOverride}
             onSetTheme={onSetTheme}
             animationsEnabled={animationsEnabled}

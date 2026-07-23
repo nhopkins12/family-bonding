@@ -1,0 +1,29 @@
+version: 1
+backend:
+  phases:
+    build:
+      commands:
+        - 'npm ci --cache .npm --prefer-offline'
+        - 'npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID'
+        # Idempotent (skips titles that already exist) — safe to run on every build.
+        # Needs ADMIN_NAME/ADMIN_PASSWORD set as env vars on this Amplify app for an
+        # Admins-group account; if they're not set (or seeding fails for any other
+        # reason) this logs a warning instead of failing the whole deploy.
+        - >
+          if [ -n "$ADMIN_NAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
+            npm run seed-movies || echo "Movie seeding failed — continuing deploy anyway.";
+          else
+            echo "ADMIN_NAME/ADMIN_PASSWORD not set — skipping movie seeding.";
+          fi
+frontend:
+  phases:
+    build:
+      commands:
+        - 'npm run build'
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - '.npm/**/*'

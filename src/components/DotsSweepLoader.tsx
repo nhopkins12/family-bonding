@@ -51,7 +51,14 @@ export function DotsSweepLoader({ loading = false, onDone }: DotsSweepLoaderProp
   loadingRef.current = loading
 
   function handleLeaderAnimationEnd(e: AnimationEvent<HTMLDivElement>) {
-    if (e.animationName !== 'dots-sweep-leader-move') return
+    // phase !== 'playing' guards against a second animationend for the same
+    // animation name — doesn't happen with the current CSS (.dots-sweep-leaving
+    // clears the animation with `animation: none` instead of re-declaring
+    // dots-sweep-leader-move), but GunBarrelLoader hit exactly that bug when a
+    // later phase's CSS re-listed the same keyframe name, restarting the whole
+    // `animation` list and re-firing this handler. Keeping the guard here too
+    // means the same mistake can't silently reintroduce it later.
+    if (e.animationName !== 'dots-sweep-leader-move' || phase !== 'playing') return
     // Loading might already be finished by the time the leader arrives, in
     // which case skip the hold entirely and go straight to leaving.
     setPhase(loadingRef.current ? 'holding' : 'leaving')

@@ -9,11 +9,13 @@ interface MovieCardProps {
   trailing?: ReactNode
   onClick?: () => void
   draggable?: boolean
+  overlay?: boolean
 }
 
-export function MovieCard({ movie, rank, subtitle, trailing, onClick, draggable }: MovieCardProps) {
+export function MovieCard({ movie, rank, subtitle, trailing, onClick, draggable, overlay }: MovieCardProps) {
+  const className = ['movie-card', draggable && 'movie-card-draggable', overlay && 'movie-card-overlay'].filter(Boolean).join(' ')
   return (
-    <div className={`movie-card${draggable ? ' movie-card-draggable' : ''}`}>
+    <div className={className}>
       {rank !== undefined && <span className="rank-badge">{rank}</span>}
       <button type="button" className="movie-card-main" onClick={onClick}>
         <PosterImage movie={movie} size="sm" />
