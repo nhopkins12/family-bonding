@@ -261,6 +261,13 @@
               "isRequired": true,
               "attributes": []
             },
+            "category": {
+              "name": "category",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
             "orderedMovieIds": {
               "name": "orderedMovieIds",
               "isArray": true,
@@ -367,83 +374,6 @@
               "name": "text",
               "isArray": false,
               "type": "String",
-              "isRequired": false,
-              "attributes": []
-            },
-            "story": {
-              "name": "story",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "bond": {
-              "name": "bond",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "villain": {
-              "name": "villain",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "action": {
-              "name": "action",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "style": {
-              "name": "style",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "themeSong": {
-              "name": "themeSong",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "rewatchability": {
-              "name": "rewatchability",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "datedness": {
-              "name": "datedness",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "misogyny": {
-              "name": "misogyny",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "culturalInsensitivity": {
-              "name": "culturalInsensitivity",
-              "isArray": false,
-              "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "campiness": {
-              "name": "campiness",
-              "isArray": false,
-              "type": "Int",
               "isRequired": false,
               "attributes": []
             },
