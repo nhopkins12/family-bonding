@@ -20,7 +20,10 @@ export function MembersList({ onOpenMember }: MembersListProps) {
           const rankedCount = allRankings.find((r) => r.owner === ownerId)?.orderedMovieIds?.filter(Boolean).length ?? 0
           return (
             <button key={ownerId} type="button" className="member-card" onClick={() => onOpenMember(ownerId)}>
-              <span className="member-card-name">{profile.displayName}</span>
+              <span className="member-card-identity">
+                <span className="member-card-name">{profile.displayName}</span>
+                {profile.username && <span className="member-card-username">@{profile.username}</span>}
+              </span>
               <span className="member-card-stat">{rankedCount === 0 ? 'No ranking yet' : `${rankedCount} ranked`}</span>
             </button>
           )

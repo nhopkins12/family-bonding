@@ -3,8 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b0d" />
+    <!-- Only takes effect if added to the home screen (iOS ignores theme-color
+         entirely in regular Safari browsing) — best-effort for that case, not a
+         full fix for the toolbar staying light in a normal Safari tab. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Family Bonding</title>
   </head>
   <body>

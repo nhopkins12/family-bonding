@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAppData } from '../state/AppDataContext'
+import { ModalBackdrop } from './ModalBackdrop'
 
 interface AdminPanelProps {
   onClose: () => void
@@ -7,7 +8,7 @@ interface AdminPanelProps {
 
 export function AdminPanel({ onClose }: AdminPanelProps) {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClose={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
           Close
@@ -27,7 +28,7 @@ export function AdminPanel({ onClose }: AdminPanelProps) {
           <AddMovieForm />
         </section>
       </div>
-    </div>
+    </ModalBackdrop>
   )
 }
 
@@ -62,9 +63,20 @@ function AddMemberForm() {
     <>
       <form className="admin-form" onSubmit={handleSubmit}>
         <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
+          Username
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            required
+          />
         </label>
+        <p className="admin-form-hint">
+          This becomes their permanent sign-in name. They can set their own display name — what actually shows up around
+          the app — after signing in.
+        </p>
         <label>
           Password
           <input

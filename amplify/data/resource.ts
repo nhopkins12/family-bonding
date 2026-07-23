@@ -28,6 +28,12 @@ const schema = a.schema({
   AppUser: a
     .model({
       displayName: a.string().required(),
+      // The original sign-in handle (the slug half of <slug>@member.local), captured
+      // once at profile creation and never edited again — displayName is the part
+      // members can freely restyle; this is the fixed one an admin can still look up
+      // them by. Nullable (not .required()) only so existing rows created before this
+      // field existed don't turn into a GraphQL null-field error on read.
+      username: a.string(),
       active: a.boolean().default(true),
     })
     .authorization((allow) => [
@@ -56,7 +62,6 @@ const schema = a.schema({
       bond: a.integer(),
       villain: a.integer(),
       action: a.integer(),
-      style: a.integer(),
       themeSong: a.integer(),
       rewatchability: a.integer(),
       datedness: a.integer(),

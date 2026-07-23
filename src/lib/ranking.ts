@@ -80,7 +80,9 @@ export interface CategoryRankingEntry<T extends MovieLike = MovieLike> {
  * just one user's reviews for a personal category ranking — the averaging logic is
  * the same either way. Movies nobody has scored on this category are omitted.
  * Higher average sorts first; for inverted categories (Datedness, Misogyny) that
- * means "most present" first, not "best" first — callers label that in the UI.
+ * means "most present" first, not "best" first. There's no longer a UI label calling
+ * that out (removed per product feedback) — SUBRATING_LABELS' plain names are all a
+ * caller has to work with now.
  */
 export function computeCategoryRanking<T extends MovieLike>(
   movies: T[],

@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  defaultDropAnimationSideEffects,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
+  type DropAnimation,
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useAppData } from '../state/AppDataContext'
@@ -27,6 +30,17 @@ type Zone = 'ranked' | 'unranked'
 
 function sameOrder(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i])
+}
+
+// Matches the settle-speed tweak on DraggableMovieRow's own useSortable transition —
+// keeping the pickup and drop feeling like one continuous motion instead of two
+// differently-timed animations bolted together.
+const dropAnimationConfig: DropAnimation = {
+  duration: 220,
+  easing: 'cubic-bezier(0.2, 0, 0, 1)',
+  sideEffects: defaultDropAnimationSideEffects({
+    styles: { active: { opacity: '0.4' } },
+  }),
 }
 
 export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
@@ -181,6 +195,9 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   const visibleUnrankedMovies = unrankedMovies.filter(matches)
   const visibleUnrankedIds = visibleUnrankedMovies.map((m) => m.id)
 
+  const activeMovie = activeId ? moviesById.get(activeId) : undefined
+  const activeRank = activeId ? localRanked.indexOf(activeId) : -1
+
   return (
     <div className="ranking-board">
       <div className="ranking-board-controls">
@@ -270,6 +287,12 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
               </SortableContext>
             </DroppableZone>
           </section>
+
+          <DragOverlay dropAnimation={dropAnimationConfig}>
+            {activeMovie && (
+              <MovieCard movie={activeMovie} rank={activeRank === -1 ? undefined : activeRank + 1} overlay />
+            )}
+          </DragOverlay>
         </DndContext>
       ) : (
         <CategoryPersonalRanking sortKey={sortKey} onOpenMovie={onOpenMovie} onRank={rankMovie} onUnrank={unrankMovie} />

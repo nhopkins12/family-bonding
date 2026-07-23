@@ -5,6 +5,12 @@
  *
  * Usage:
  *   ADMIN_NAME="Nick" ADMIN_PASSWORD=... npm run seed-movies
+ *   POSTER_SOURCE=wikipedia ADMIN_NAME="Nick" ADMIN_PASSWORD=... npm run seed-movies
+ *
+ * POSTER_SOURCE defaults to 'tmdb' (real portrait one-sheet art). 'wikipedia' switches
+ * back to the original landscape UK-quad scans in BOND_MOVIES[].posterUrlWikipedia —
+ * kept as an option rather than deleted, even though they don't fit the poster grid's
+ * aspect ratio as well.
  */
 import { Amplify } from 'aws-amplify'
 import { signIn } from 'aws-amplify/auth'
@@ -38,6 +44,8 @@ async function main() {
   }
   const existingTitles = new Set(existing.map((m) => m.title))
 
+  const posterSource = process.env.POSTER_SOURCE === 'wikipedia' ? 'wikipedia' : 'tmdb'
+
   let created = 0
   for (const [index, movie] of BOND_MOVIES.entries()) {
     if (existingTitles.has(movie.title)) continue
@@ -45,7 +53,7 @@ async function main() {
       title: movie.title,
       year: movie.year,
       actor: movie.actor,
-      posterUrl: movie.posterUrl,
+      posterUrl: posterSource === 'wikipedia' ? movie.posterUrlWikipedia : movie.posterUrl,
       sortOrder: index,
     })
     if (errors) {

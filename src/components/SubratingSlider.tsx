@@ -1,21 +1,20 @@
-import { SUBRATING_LABELS, INVERTED_SUBRATINGS, type SubratingKey } from '../types'
+import { SUBRATING_LABELS, type SubratingKey } from '../types'
 
 interface SubratingSliderProps {
   subratingKey: SubratingKey
   value: number | undefined
-  onChange: (value: number) => void
+  onChange: (value: number | undefined) => void
   disabled?: boolean
 }
 
 export function SubratingSlider({ subratingKey, value, onChange, disabled }: SubratingSliderProps) {
-  const isInverted = INVERTED_SUBRATINGS.has(subratingKey)
   const displayValue = value ?? 0
+  const isSet = value !== undefined
 
   return (
     <div className="subrating-row">
       <span className="subrating-row-label">
         <span className="subrating-row-label-text">{SUBRATING_LABELS[subratingKey]}</span>
-        {isInverted && <span className="inverted-tag">more</span>}
       </span>
       <input
         type="range"
@@ -27,6 +26,14 @@ export function SubratingSlider({ subratingKey, value, onChange, disabled }: Sub
         onChange={(e) => onChange(Number(e.target.value))}
       />
       <span className="subrating-row-value">{value ?? '–'}</span>
+      <button
+        type="button"
+        className="subrating-row-clear"
+        onClick={() => onChange(undefined)}
+        disabled={disabled || !isSet}
+        aria-label={`Clear ${SUBRATING_LABELS[subratingKey]} rating`}
+        title="Clear rating"
+      />
     </div>
   )
 }

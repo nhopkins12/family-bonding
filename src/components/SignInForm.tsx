@@ -77,7 +77,15 @@ export function SignInForm() {
     <form className="admin-form" onSubmit={handleSignIn}>
       <label>
         Name
-        <input value={nameOrEmail} onChange={(e) => setNameOrEmail(e.target.value)} required autoFocus />
+        <input
+          value={nameOrEmail}
+          onChange={(e) => setNameOrEmail(e.target.value)}
+          required
+          autoFocus
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
       </label>
       <label>
         Password
