@@ -82,6 +82,8 @@ export function GunBarrelLoader({ loading, onFinish }: GunBarrelLoaderProps) {
       aria-label="Loading Family Bonding"
       onTransitionEnd={handleContainerTransitionEnd}
     >
+      <div className="gunbarrel-bleed gunbarrel-bleed-top" aria-hidden="true" />
+      <div className="gunbarrel-bleed gunbarrel-bleed-bottom" aria-hidden="true" />
       <img className="gunbarrel-dot" src={dotSrc} alt="" aria-hidden="true" />
       <img className="gunbarrel-barrel" src={barrelSrc} alt="" aria-hidden="true" onAnimationEnd={handleBarrelAnimationEnd} />
     </div>

@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  AutoScrollActivator,
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   defaultDropAnimationSideEffects,
   useDroppable,
   useSensor,
   useSensors,
+  type AutoScrollOptions,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -43,6 +46,22 @@ const dropAnimationConfig: DropAnimation = {
   }),
 }
 
+// dnd-kit's default autoscroll checks the *dragged item's computed rectangle*
+// against the scroll container's edge, not the actual pointer/finger position. On
+// touch, the DragOverlay's rendered box can sit slightly offset from where your
+// finger really is, so "am I near the edge" and "is my finger near the edge" don't
+// always agree — most noticeable exactly where it matters most here: dragging a
+// long way (e.g. up from deep in Unranked into Ranked) rather than a short reorder.
+// Pointer-based activation checks the real touch point directly instead. threshold
+// is also widened (default ~0.2) and acceleration raised (default ~10) so it kicks
+// in earlier and moves faster — less precision required to trigger it, less time
+// spent holding still at the edge waiting for something to happen.
+const autoScrollConfig: AutoScrollOptions = {
+  activator: AutoScrollActivator.Pointer,
+  threshold: { x: 0, y: 0.3 },
+  acceleration: 20,
+}
+
 export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   const { movies, moviesLoading, rankedIds, setMyRanking } = useAppData()
   const [sortKey, setSortKey] = useState<SortKey>('overall')
@@ -75,10 +94,78 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
     setLocalUnranked(unrankedIds)
   }, [rankedIds, unrankedIds, activeId])
 
+  // Mouse and touch need different activation rules for the same whole-row drag
+  // handle. Mouse: start as soon as the pointer moves 5px (instant, like before —
+  // nothing on desktop reaches for a scrollbar by accident). Touch: require a short
+  // hold before the drag activates ("delay"), and cancel it if the finger travels
+  // more than "tolerance" px first — that part is unchanged from dnd-kit's own
+  // documented answer to telling a deliberate drag apart from a scroll swipe.
+  //
+  // What's different from the first attempt at this: the rows themselves are
+  // touch-action:none again (see .movie-card-draggable in index.css), not "auto".
+  // On real iOS Safari, leaving touch-action as auto let the browser's compositor
+  // start optimistically treating the hold as a native pan before the delay timer
+  // ever fired dnd-kit's activation — once that happens, iOS stops reliably handing
+  // the gesture back to JS, so the drag would technically activate (you'd see the
+  // lifted-row highlight) but the floating card never visually tracked the finger
+  // afterward. touch-action:none prevents the browser from ever contesting the
+  // gesture, which is what made dragging itself reliable in every version tried
+  // this far — the tradeoff is that it also blocks native scrolling for any touch
+  // that starts on a row, which is what the manual scroll effect below exists to
+  // replace.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+
+  const isDraggingRef = useRef(false)
+  const boardRef = useRef<HTMLDivElement | null>(null)
+
+  // Hand-rolled scroll, standing in for the native touch-scroll that
+  // touch-action:none disables on draggable rows above. While no drag has
+  // activated yet, a touch that started on a card just scrolls the page by the
+  // same amount the finger moved — a 1:1 replacement, no momentum/inertia, but
+  // enough to make the list scrollable again. The instant a drag activates
+  // (isDraggingRef flips true, set synchronously in handleDragStart so this
+  // doesn't rely on a React re-render landing in time), this stops touching
+  // scroll at all and dnd-kit's own pointer-based autoscroll takes over instead.
+  useEffect(() => {
+    const board = boardRef.current
+    if (!board) return
+
+    let lastY: number | null = null
+
+    function onTouchStart(event: TouchEvent) {
+      if (isDraggingRef.current) return
+      const target = event.target as HTMLElement | null
+      if (!target?.closest('.movie-card-draggable')) return
+      lastY = event.touches[0]?.clientY ?? null
+    }
+
+    function onTouchMove(event: TouchEvent) {
+      if (isDraggingRef.current || lastY === null) return
+      const currentY = event.touches[0]?.clientY
+      if (currentY === undefined) return
+      window.scrollBy(0, lastY - currentY)
+      lastY = currentY
+    }
+
+    function onTouchEnd() {
+      lastY = null
+    }
+
+    board.addEventListener('touchstart', onTouchStart, { passive: true })
+    board.addEventListener('touchmove', onTouchMove, { passive: true })
+    board.addEventListener('touchend', onTouchEnd, { passive: true })
+    board.addEventListener('touchcancel', onTouchEnd, { passive: true })
+    return () => {
+      board.removeEventListener('touchstart', onTouchStart)
+      board.removeEventListener('touchmove', onTouchMove)
+      board.removeEventListener('touchend', onTouchEnd)
+      board.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [])
 
   if (moviesLoading) {
     return <p className="empty-state">Loading movies…</p>
@@ -97,7 +184,13 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   }
 
   function handleDragStart(event: DragStartEvent) {
+    isDraggingRef.current = true
     setActiveId(String(event.active.id))
+  }
+
+  function handleDragCancel() {
+    isDraggingRef.current = false
+    setActiveId(null)
   }
 
   function handleDragOver(event: DragOverEvent) {
@@ -128,6 +221,7 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
+    isDraggingRef.current = false
     setActiveId(null)
 
     if (over) {
@@ -199,7 +293,7 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   const activeRank = activeId ? localRanked.indexOf(activeId) : -1
 
   return (
-    <div className="ranking-board">
+    <div className="ranking-board" ref={boardRef}>
       <div className="ranking-board-controls">
         <SortControl value={sortKey} onChange={setSortKey} />
         {sortKey === 'overall' && movies.length > 0 && (
@@ -218,9 +312,11 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
+          autoScroll={autoScrollConfig}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
           <section className="ranking-section">
             <h2>Ranked</h2>

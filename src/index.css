@@ -132,17 +132,6 @@ body,
   height: 100%;
 }
 
-/* Stops mobile Safari/Chrome's pull-to-refresh rubber-band bounce at the top of the
-   page. That bounce temporarily scrolls the visual viewport past its normal bounds,
-   which can reveal a gap above position:fixed full-screen overlays (the gun-barrel
-   intro splash, most visibly) since the browser's own bounce animation isn't
-   something a fixed element's inset:0 can track. Disabling it site-wide is standard
-   practice for an app-like SPA that has no real use for that gesture anyway. */
-html,
-body {
-  overscroll-behavior-y: none;
-}
-
 body {
   margin: 0;
   background: var(--bg);
@@ -728,14 +717,6 @@ h3 {
   background: var(--bg-hover);
 }
 
-/* touch-action:none used to live on the whole row (.movie-card-draggable) — meaning
-   ANY vertical swipe starting anywhere on a card, including one meant to scroll past
-   it, got captured as a drag attempt instead, with no way to tell the two apart. That
-   was most painful in Unranked specifically, since it's normally the longest list.
-   Moving touch-action:none and the drag listeners onto just the poster button (no
-   separate handle icon — the poster is already there and is a small, obvious enough
-   target) fixes both: touching the rest of the row scrolls normally like any other
-   content, and the poster is the one deliberate target you grab to drag. */
 .movie-card-poster-button {
   flex-shrink: 0;
   background: none;
@@ -745,13 +726,37 @@ h3 {
   border-radius: var(--radius-sm);
 }
 
-.movie-card-draggable .movie-card-poster-button {
+/* The whole row is the drag handle (see DraggableMovieRow/RankingBoard). touch-action
+   is "none" rather than left "auto" here — on real iOS Safari, "auto" let the
+   browser's compositor start optimistically treating a held-still touch as a native
+   pan before dnd-kit's hold-then-drag timer (TouchSensor's activationConstraint.delay)
+   ever fired, and once that happened iOS stopped reliably handing the gesture back to
+   JS: the drag would technically activate but the floating card never visually
+   tracked the finger afterward. "none" stops the browser from ever contesting the
+   gesture, so JS is unambiguously in control — the tradeoff is that native scrolling
+   is now blocked for any touch starting on a row, which RankingBoard's manual
+   touchmove handler exists to replace. This also still needs to suppress iOS
+   Safari's own long-press gestures — the text-selection loupe and the image
+   "Save/Copy" callout — since holding still for ~200ms to start a drag is well
+   within the window either of those can kick in and steal the touch sequence.
+   Neither of these exists in desktop browsers (including desktop WebKit), which is
+   why all of this was invisible to every round of testing that didn't use a real
+   iPhone. */
+.movie-card-draggable {
   cursor: grab;
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.movie-card-draggable .movie-card-poster-button:active {
+.movie-card-draggable:active {
   cursor: grabbing;
+}
+
+.movie-card-draggable .movie-card-poster-button img {
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 
 /* The floating clone rendered in <DragOverlay> — the thing that actually follows the
@@ -1700,6 +1705,34 @@ h3 {
 
 .gunbarrel-leaving {
   opacity: 0;
+}
+
+/* The barrel image itself is exactly 100dvh tall (top:0), matching the visible
+   viewport with no margin. A mobile pull-to-refresh/rubber-band bounce briefly
+   shifts the visible area past that, and position:fixed elements don't reliably
+   track that transient shift — so without this, the bounce reveals a gap of
+   plain page background above the barrel for an instant. These two strips sit
+   just outside the barrel's own 0–100dvh band (entirely off-screen under normal
+   conditions) with a generous 50dvh of black margin — comfortably more than any
+   realistic bounce distance — so whatever the bounce reveals is still more black,
+   same as the barrel's own opaque regions, rather than a gap. (DotsSweepLoader's
+   box-shadow hole trick gets this bleed for free at a 9999px spread; the real
+   barrel artwork here doesn't extend past its own frame, so these strips stand
+   in for it.) */
+.gunbarrel-bleed {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 50dvh;
+  background: #000;
+}
+
+.gunbarrel-bleed-top {
+  top: -50dvh;
+}
+
+.gunbarrel-bleed-bottom {
+  top: 100dvh;
 }
 
 .gunbarrel-dot {
