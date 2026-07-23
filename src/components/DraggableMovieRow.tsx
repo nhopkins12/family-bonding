@@ -35,9 +35,23 @@ export function DraggableMovieRow({ movie, rank, onOpen, trailing }: DraggableMo
     position: 'relative' as const,
   }
 
+  // setNodeRef stays on the row itself (dnd-kit needs the whole row's position for
+  // reordering) but attributes/listeners — the things that actually start a drag — go
+  // only onto the poster button (see MovieCard), not the whole row. Putting them on
+  // the whole row (as this used to) meant touch-action:none applied everywhere on it
+  // too, so any vertical swipe meant to scroll past the card, not drag it, got
+  // captured as a drag attempt instead, with no way to tell the two apart. No visible
+  // handle icon needed — the poster itself, already there, is a small enough target.
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <MovieCard movie={movie} rank={rank} onClick={onOpen} trailing={trailing} draggable />
+    <div ref={setNodeRef} style={style}>
+      <MovieCard
+        movie={movie}
+        rank={rank}
+        onClick={onOpen}
+        trailing={trailing}
+        draggable
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
     </div>
   )
 }
