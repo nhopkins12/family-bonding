@@ -29,6 +29,7 @@
     "@aws-amplify/backend-cli": "^1.8.3",
     "@aws-sdk/client-cognito-identity-provider": "^3.1092.0",
     "@eslint/js": "^9.9.0",
+    "@types/node": "^22.10.0",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
