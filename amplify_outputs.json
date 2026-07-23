@@ -1,9 +1,9 @@
 {
   "auth": {
-    "user_pool_id": "us-east-1_r73EdM4e6",
+    "user_pool_id": "us-east-1_rrP6IC0t1",
     "aws_region": "us-east-1",
-    "user_pool_client_id": "67h9tdqfn3pnj1kd383b1otg60",
-    "identity_pool_id": "us-east-1:0014bacd-ff3a-4538-b43e-dbe7adae71d7",
+    "user_pool_client_id": "5p99f7vlogh87jo1ir5vi9c4d3",
+    "identity_pool_id": "us-east-1:abf58857-dec4-4e97-9822-5a57c092f393",
     "mfa_methods": [],
     "standard_required_attributes": [
       "email"
@@ -32,7 +32,7 @@
     "unauthenticated_identities_enabled": true
   },
   "data": {
-    "url": "https://ndn7cpcrpffv3en5sxe2h5pyye.appsync-api.us-east-1.amazonaws.com/graphql",
+    "url": "https://ejjfoxqoo5bsjlgasiclbae5ba.appsync-api.us-east-1.amazonaws.com/graphql",
     "aws_region": "us-east-1",
     "default_authorization_type": "AMAZON_COGNITO_USER_POOLS",
     "authorization_types": [
@@ -261,13 +261,6 @@
               "isRequired": true,
               "attributes": []
             },
-            "category": {
-              "name": "category",
-              "isArray": false,
-              "type": "String",
-              "isRequired": true,
-              "attributes": []
-            },
             "orderedMovieIds": {
               "name": "orderedMovieIds",
               "isArray": true,
@@ -374,6 +367,83 @@
               "name": "text",
               "isArray": false,
               "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "story": {
+              "name": "story",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "bond": {
+              "name": "bond",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "villain": {
+              "name": "villain",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "action": {
+              "name": "action",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "style": {
+              "name": "style",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "themeSong": {
+              "name": "themeSong",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "rewatchability": {
+              "name": "rewatchability",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "datedness": {
+              "name": "datedness",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "misogyny": {
+              "name": "misogyny",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "culturalInsensitivity": {
+              "name": "culturalInsensitivity",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "campiness": {
+              "name": "campiness",
+              "isArray": false,
+              "type": "Int",
               "isRequired": false,
               "attributes": []
             },
