@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { MovieLike, RankingRecord, ReviewRecord } from './ranking'
-import { computeCategoryRanking, computeGroupRanking, computeMovieCategoryAverages } from './ranking'
+import type { MovieLike, RankingRecord } from './ranking'
+import { computeGroupRanking, findRank } from './ranking'
 
 function movie(id: string, title: string): MovieLike {
   return { id, title }
@@ -68,107 +68,34 @@ describe('computeGroupRanking', () => {
     expect(byId.a.reviewerCount).toBe(2)
     expect(byId.b.reviewerCount).toBe(1)
   })
-})
 
-describe('computeCategoryRanking', () => {
-  it('averages a positive category across all review records', () => {
-    const reviews: ReviewRecord[] = [
-      { movieId: 'a', story: 8 },
-      { movieId: 'b', story: 4 },
-      { movieId: 'a', story: 6 },
-    ]
-    const result = computeCategoryRanking(movies, reviews, 'story')
+  it('aggregates a category ranking the same way as overall — callers just pre-filter by category', () => {
+    // Two people's "Villain" rankings (already filtered to category === 'villain' by the caller).
+    const villainRankings: RankingRecord[] = [{ orderedMovieIds: ['b', 'a'] }, { orderedMovieIds: ['a', 'b', 'c'] }]
+    const result = computeGroupRanking(movies, villainRankings)
     const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
-    expect(byId.a.average).toBe(7)
-    expect(byId.a.reviewerCount).toBe(2)
-    expect(byId.b.average).toBe(4)
-    expect(byId.b.reviewerCount).toBe(1)
-  })
-
-  it('sorts highest average first for a positive category', () => {
-    const reviews: ReviewRecord[] = [
-      { movieId: 'a', action: 5 },
-      { movieId: 'b', action: 9 },
-      { movieId: 'c', action: 7 },
-    ]
-    const result = computeCategoryRanking(movies, reviews, 'action')
-    expect(result.map((e) => e.movie.id)).toEqual(['b', 'c', 'a'])
-  })
-
-  it('sorts Datedness highest-first too (caller frames it as "most dated", not "best")', () => {
-    const reviews: ReviewRecord[] = [
-      { movieId: 'a', datedness: 2 },
-      { movieId: 'b', datedness: 8 },
-    ]
-    const result = computeCategoryRanking(movies, reviews, 'datedness')
-    expect(result.map((e) => e.movie.id)).toEqual(['b', 'a'])
-  })
-
-  it('sorts Misogyny highest-first too (caller frames it as "most misogynistic", not "best")', () => {
-    const reviews: ReviewRecord[] = [
-      { movieId: 'a', misogyny: 1 },
-      { movieId: 'b', misogyny: 9 },
-      { movieId: 'c', misogyny: 5 },
-    ]
-    const result = computeCategoryRanking(movies, reviews, 'misogyny')
-    expect(result.map((e) => e.movie.id)).toEqual(['b', 'c', 'a'])
-  })
-
-  it('sorts Cultural Insensitivity and Campiness highest-first too (descriptive, not "best")', () => {
-    const culturalInsensitivityReviews: ReviewRecord[] = [
-      { movieId: 'a', culturalInsensitivity: 2 },
-      { movieId: 'b', culturalInsensitivity: 9 },
-    ]
-    expect(computeCategoryRanking(movies, culturalInsensitivityReviews, 'culturalInsensitivity').map((e) => e.movie.id)).toEqual([
-      'b',
-      'a',
-    ])
-
-    const campinessReviews: ReviewRecord[] = [
-      { movieId: 'a', campiness: 7 },
-      { movieId: 'b', campiness: 3 },
-    ]
-    expect(computeCategoryRanking(movies, campinessReviews, 'campiness').map((e) => e.movie.id)).toEqual(['a', 'b'])
-  })
-
-  it('averages the renamed "bond" category (formerly bondPerformance)', () => {
-    const reviews: ReviewRecord[] = [{ movieId: 'a', bond: 8 }, { movieId: 'a', bond: 6 }]
-    const result = computeCategoryRanking(movies, reviews, 'bond')
-    expect(result[0]).toMatchObject({ average: 7, reviewerCount: 2 })
-  })
-
-  it('omits movies nobody has scored on that category', () => {
-    const reviews: ReviewRecord[] = [{ movieId: 'a', story: 5 }]
-    const result = computeCategoryRanking(movies, reviews, 'story')
-    expect(result.map((e) => e.movie.id)).toEqual(['a'])
-  })
-
-  it('ignores null/undefined category values instead of treating them as zero', () => {
-    const reviews: ReviewRecord[] = [{ movieId: 'a', story: null }, { movieId: 'a', story: 8 }, { movieId: 'b' }]
-    const result = computeCategoryRanking(movies, reviews, 'story')
-    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
-    expect(byId.a.average).toBe(8)
-    expect(byId.a.reviewerCount).toBe(1)
-    expect(byId.b).toBeUndefined()
-  })
-
-  it('breaks ties alphabetically by title', () => {
-    const reviews: ReviewRecord[] = [{ movieId: 'a', villain: 5 }, { movieId: 'b', villain: 5 }]
-    const result = computeCategoryRanking(movies, reviews, 'villain')
-    expect(result.map((e) => e.movie.id)).toEqual(['a', 'b'])
+    expect(byId.a.averageRank).toBe(1.5)
+    expect(byId.b.averageRank).toBe(1.5)
+    expect(byId.c.averageRank).toBe(3)
   })
 })
 
-describe('computeMovieCategoryAverages', () => {
-  it('averages every requested category for one movie across users', () => {
-    const reviews: ReviewRecord[] = [
-      { movieId: 'a', story: 8, misogyny: 2 },
-      { movieId: 'a', story: 6, misogyny: 4 },
-      { movieId: 'b', story: 9 },
-    ]
-    const result = computeMovieCategoryAverages('a', reviews, ['story', 'misogyny', 'action'])
-    expect(result.story).toEqual({ average: 7, reviewerCount: 2 })
-    expect(result.misogyny).toEqual({ average: 3, reviewerCount: 2 })
-    expect(result.action).toBeNull()
+describe('findRank', () => {
+  it('reports 1-indexed position and total length', () => {
+    expect(findRank('b', ['a', 'b', 'c'])).toEqual({ position: 2, total: 3 })
+  })
+
+  it('returns null when the movie is not in the list', () => {
+    expect(findRank('z', ['a', 'b', 'c'])).toBeNull()
+  })
+
+  it('returns null for an empty or missing list', () => {
+    expect(findRank('a', [])).toBeNull()
+    expect(findRank('a', null)).toBeNull()
+    expect(findRank('a', undefined)).toBeNull()
+  })
+
+  it('filters out null entries before computing position', () => {
+    expect(findRank('b', ['a', null, 'b'])).toEqual({ position: 2, total: 2 })
   })
 })

@@ -1,5 +1,3 @@
-import type { SubratingKey } from '../types'
-
 export interface MovieLike {
   id: string
   title: string
@@ -8,13 +6,6 @@ export interface MovieLike {
 /** A user's ranking record — the backend field is nullable-array-of-nullable-string per GraphQL. */
 export interface RankingRecord {
   orderedMovieIds?: (string | null)[] | null
-}
-
-export type CategoryRatings = Partial<Record<SubratingKey, number | null | undefined>>
-
-/** A single review record: one user's rating of one movie. */
-export interface ReviewRecord extends CategoryRatings {
-  movieId: string
 }
 
 export interface GroupRankingEntry<T extends MovieLike = MovieLike> {
@@ -30,6 +21,12 @@ export interface GroupRankingEntry<T extends MovieLike = MovieLike> {
  * across only the users who ranked it (unranked = excluded, not penalized).
  * Movies nobody has ranked are omitted entirely (there is nothing to average).
  * Ties break alphabetically by title.
+ *
+ * Category ranking uses this exact same function — a "category ranking" is just
+ * a Ranking record scoped to a category instead of 'overall', so aggregating
+ * several people's Story rankings into one global Story order is identical math
+ * to aggregating their Overall rankings. Callers just pre-filter the records
+ * they pass in by category.
  */
 export function computeGroupRanking<T extends MovieLike>(
   movies: T[],
@@ -68,77 +65,19 @@ export function computeGroupRanking<T extends MovieLike>(
   return entries
 }
 
-export interface CategoryRankingEntry<T extends MovieLike = MovieLike> {
-  movie: T
-  average: number
-  reviewerCount: number
+export interface RankPosition {
+  position: number
+  total: number
 }
 
 /**
- * Ranks movies by the average of a single rating category, across whichever review
- * records are passed in. Pass every review for a global/group category ranking, or
- * just one user's reviews for a personal category ranking — the averaging logic is
- * the same either way. Movies nobody has scored on this category are omitted.
- * Higher average sorts first; for inverted categories (Datedness, Misogyny) that
- * means "most present" first, not "best" first — callers label that in the UI.
+ * Where a movie sits in a single ordered list (1-indexed), or null if the list
+ * doesn't include it. Used both for a single person's per-category rank lookup
+ * and for showing "#3 of 12" alongside a computeGroupRanking-derived global bar.
  */
-export function computeCategoryRanking<T extends MovieLike>(
-  movies: T[],
-  reviews: ReviewRecord[],
-  key: SubratingKey,
-): CategoryRankingEntry<T>[] {
-  const sums = new Map<string, number>()
-  const counts = new Map<string, number>()
-
-  for (const review of reviews) {
-    const value = review[key]
-    if (typeof value === 'number') {
-      sums.set(review.movieId, (sums.get(review.movieId) ?? 0) + value)
-      counts.set(review.movieId, (counts.get(review.movieId) ?? 0) + 1)
-    }
-  }
-
-  const entries: CategoryRankingEntry<T>[] = []
-  for (const movie of movies) {
-    const count = counts.get(movie.id) ?? 0
-    if (count === 0) continue
-    entries.push({ movie, average: sums.get(movie.id)! / count, reviewerCount: count })
-  }
-
-  entries.sort((a, b) => {
-    if (a.average !== b.average) return b.average - a.average
-    return a.movie.title.localeCompare(b.movie.title)
-  })
-
-  return entries
-}
-
-export interface CategorySummary {
-  average: number
-  reviewerCount: number
-}
-
-/** Averages every rating category for one movie, across all review records that mention it. */
-export function computeMovieCategoryAverages(
-  movieId: string,
-  reviews: ReviewRecord[],
-  keys: readonly SubratingKey[],
-): Record<SubratingKey, CategorySummary | null> {
-  const relevant = reviews.filter((r) => r.movieId === movieId)
-  const result = {} as Record<SubratingKey, CategorySummary | null>
-
-  for (const key of keys) {
-    let sum = 0
-    let count = 0
-    for (const review of relevant) {
-      const value = review[key]
-      if (typeof value === 'number') {
-        sum += value
-        count += 1
-      }
-    }
-    result[key] = count > 0 ? { average: sum / count, reviewerCount: count } : null
-  }
-
-  return result
+export function findRank(movieId: string, orderedMovieIds?: (string | null)[] | null): RankPosition | null {
+  const ids = (orderedMovieIds ?? []).filter((id): id is string => Boolean(id))
+  const index = ids.indexOf(movieId)
+  if (index === -1) return null
+  return { position: index + 1, total: ids.length }
 }

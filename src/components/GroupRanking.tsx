@@ -1,34 +1,27 @@
 import { useMemo, useState } from 'react'
 import { useAppData } from '../state/AppDataContext'
-import { computeCategoryRanking, computeGroupRanking } from '../lib/ranking'
+import { computeGroupRanking } from '../lib/ranking'
 import { getStoredView, storeView, type RankingView } from '../lib/viewPreference'
 import { MovieCard } from './MovieCard'
 import { PosterImage } from './PosterImage'
 import { SortControl } from './SortControl'
 import { SUBRATING_LABELS, type SortKey } from '../types'
-import type { MovieRecord } from '../lib/dataClient'
 
 interface GroupRankingProps {
   onOpenMovie: (movieId: string) => void
 }
 
-interface RankedEntry {
-  movie: MovieRecord
-  value: number
-  reviewerCount: number
-}
-
-function StatTrailing({ value, reviewerCount }: { value: number; reviewerCount: number }) {
+function StatTrailing({ rank, reviewerCount }: { rank: number; reviewerCount: number }) {
   return (
     <span className="movie-card-stat">
-      <span className="movie-card-stat-value">{value.toFixed(1)}</span>
+      <span className="movie-card-stat-value">{rank.toFixed(1)}</span>
       <span className="movie-card-stat-label">{reviewerCount === 1 ? '1 person' : `${reviewerCount} people`}</span>
     </span>
   )
 }
 
 export function GroupRanking({ onOpenMovie }: GroupRankingProps) {
-  const { movies, moviesLoading, allRankings, allReviews } = useAppData()
+  const { movies, moviesLoading, allRankings } = useAppData()
   const [sortKey, setSortKey] = useState<SortKey>('overall')
   const [view, setView] = useState<RankingView>(getStoredView)
 
@@ -37,18 +30,10 @@ export function GroupRanking({ onOpenMovie }: GroupRankingProps) {
     storeView(next)
   }
 
-  const overallEntries = useMemo(() => computeGroupRanking(movies, allRankings), [movies, allRankings])
-  const categoryEntries = useMemo(
-    () => (sortKey === 'overall' ? [] : computeCategoryRanking(movies, allReviews, sortKey)),
-    [movies, allReviews, sortKey],
-  )
-
-  const entries: RankedEntry[] = useMemo(() => {
-    if (sortKey === 'overall') {
-      return overallEntries.map((e) => ({ movie: e.movie, value: e.averageRank, reviewerCount: e.reviewerCount }))
-    }
-    return categoryEntries.map((e) => ({ movie: e.movie, value: e.average, reviewerCount: e.reviewerCount }))
-  }, [sortKey, overallEntries, categoryEntries])
+  // A category ranking is just a Ranking record scoped to that category instead of
+  // 'overall' — same aggregation math either way, just pre-filtered by category.
+  const rankingsForSortKey = useMemo(() => allRankings.filter((r) => r.category === sortKey), [allRankings, sortKey])
+  const entries = useMemo(() => computeGroupRanking(movies, rankingsForSortKey), [movies, rankingsForSortKey])
 
   if (moviesLoading) {
     return <p className="empty-state">Loading movies…</p>
@@ -93,7 +78,7 @@ export function GroupRanking({ onOpenMovie }: GroupRankingProps) {
                 movie={entry.movie}
                 rank={index + 1}
                 onClick={() => onOpenMovie(entry.movie.id)}
-                trailing={<StatTrailing value={entry.value} reviewerCount={entry.reviewerCount} />}
+                trailing={<StatTrailing rank={entry.averageRank} reviewerCount={entry.reviewerCount} />}
               />
             ))}
           </div>

@@ -60,11 +60,3 @@ export const SORT_OPTIONS: readonly { key: SortKey; label: string }[] = [
   { key: 'overall', label: SORT_LABELS.overall },
   ...SUBRATING_KEYS.map((key) => ({ key, label: SORT_LABELS[key] })),
 ]
-
-export type Subratings = Partial<Record<SubratingKey, number>>
-
-/** Draft shape used while editing a review in the UI, independent of the backend model. */
-export interface ReviewDraft {
-  text: string
-  subratings: Subratings
-}

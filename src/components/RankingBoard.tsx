@@ -13,11 +13,9 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useAppData } from '../state/AppDataContext'
-import { computeCategoryRanking } from '../lib/ranking'
 import { DraggableMovieRow } from './DraggableMovieRow'
-import { MovieCard } from './MovieCard'
 import { SortControl } from './SortControl'
-import { SUBRATING_LABELS, type SortKey } from '../types'
+import type { SortKey } from '../types'
 
 interface RankingBoardProps {
   onOpenMovie: (movieId: string) => void
@@ -30,10 +28,23 @@ function sameOrder(a: string[], b: string[]): boolean {
 }
 
 export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
-  const { movies, moviesLoading, rankedIds, setMyRanking } = useAppData()
-  const [sortKey, setSortKey] = useState<SortKey>('overall')
+  const { movies, moviesLoading, myRankingsByCategory, setMyRanking } = useAppData()
+  const [category, setCategory] = useState<SortKey>('overall')
   const [activeId, setActiveId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+
+  const rankedIds = useMemo(() => myRankingsByCategory.get(category) ?? [], [myRankingsByCategory, category])
+
+  // A movie counts as "watched" (for this category's unranked list) if it's been
+  // ranked in ANY other category — lets you prioritize movies you already have an
+  // opinion on instead of re-scanning the full catalog every time you switch category.
+  const rankedAnywhereIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const ids of myRankingsByCategory.values()) {
+      for (const id of ids) set.add(id)
+    }
+    return set
+  }, [myRankingsByCategory])
 
   const moviesById = useMemo(() => new Map(movies.map((m) => [m.id, m])), [movies])
   const unrankedIds = useMemo(() => {
@@ -50,8 +61,17 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
 
   function persist(nextRanked: string[]) {
     pendingSendRef.current = nextRanked
-    setMyRanking(nextRanked)
+    setMyRanking(category, nextRanked)
   }
+
+  // Switching category is a full local-state reset, same as a resync — whatever's
+  // mid-drag in the old category shouldn't carry over.
+  useEffect(() => {
+    pendingSendRef.current = null
+    setLocalRanked(rankedIds)
+    setLocalUnranked(unrankedIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category])
 
   useEffect(() => {
     if (activeId !== null) return
@@ -179,13 +199,17 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   const visibleRankedIds = visibleRankedEntries.map(({ movie }) => movie.id)
 
   const visibleUnrankedMovies = unrankedMovies.filter(matches)
+  // "Watched" = ranked in some other category already, just not this one — surfaced
+  // first so you're not hunting through the full catalog for movies you already know.
+  const watchedMovies = visibleUnrankedMovies.filter((m) => rankedAnywhereIds.has(m.id))
+  const trulyUnrankedMovies = visibleUnrankedMovies.filter((m) => !rankedAnywhereIds.has(m.id))
   const visibleUnrankedIds = visibleUnrankedMovies.map((m) => m.id)
 
   return (
     <div className="ranking-board">
       <div className="ranking-board-controls">
-        <SortControl value={sortKey} onChange={setSortKey} />
-        {sortKey === 'overall' && movies.length > 0 && (
+        <SortControl value={category} onChange={setCategory} />
+        {movies.length > 0 && (
           <input
             type="search"
             className="movie-search"
@@ -197,83 +221,103 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
         )}
       </div>
 
-      {sortKey === 'overall' ? (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <section className="ranking-section">
-            <h2>Ranked</h2>
-            <DroppableZone
-              id="zone-ranked"
-              empty={visibleRankedEntries.length === 0}
-              emptyLabel={rankedMovies.length === 0 ? 'Drag movies here to rank them.' : `No ranked movies match "${search.trim()}".`}
-            >
-              <SortableContext items={visibleRankedIds} strategy={verticalListSortingStrategy}>
-                <div className="ranked-list">
-                  {visibleRankedEntries.map(({ movie, rank }) => (
-                    <DraggableMovieRow
-                      key={movie.id}
-                      movie={movie}
-                      rank={rank}
-                      onOpen={() => onOpenMovie(movie.id)}
-                      trailing={
-                        <span className="row-controls">
-                          <button type="button" aria-label="Move up" disabled={rank === 1} onClick={() => moveRankedItem(movie.id, 'up')}>
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Move down"
-                            disabled={rank === rankedMovies.length}
-                            onClick={() => moveRankedItem(movie.id, 'down')}
-                          >
-                            ↓
-                          </button>
-                          <button type="button" aria-label="Remove from ranking" className="unrank-button" onClick={() => unrankMovie(movie.id)}>
-                            Unrank
-                          </button>
-                        </span>
-                      }
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DroppableZone>
-          </section>
-
-          <section className="ranking-section">
-            <h2>Unranked</h2>
-            <DroppableZone
-              id="zone-unranked"
-              empty={visibleUnrankedMovies.length === 0}
-              emptyLabel={unrankedMovies.length === 0 ? 'Every movie has been ranked.' : `No unranked movies match "${search.trim()}".`}
-            >
-              <SortableContext items={visibleUnrankedIds} strategy={verticalListSortingStrategy}>
-                <div className="unranked-list">
-                  {visibleUnrankedMovies.map((movie) => (
-                    <DraggableMovieRow
-                      key={movie.id}
-                      movie={movie}
-                      onOpen={() => onOpenMovie(movie.id)}
-                      trailing={
-                        <button type="button" className="rank-it-button" onClick={() => rankMovie(movie.id)}>
-                          Rank it
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <section className="ranking-section">
+          <h2>Ranked</h2>
+          <DroppableZone
+            id="zone-ranked"
+            empty={visibleRankedEntries.length === 0}
+            emptyLabel={rankedMovies.length === 0 ? 'Drag movies here to rank them.' : `No ranked movies match "${search.trim()}".`}
+          >
+            <SortableContext items={visibleRankedIds} strategy={verticalListSortingStrategy}>
+              <div className="ranked-list">
+                {visibleRankedEntries.map(({ movie, rank }) => (
+                  <DraggableMovieRow
+                    key={movie.id}
+                    movie={movie}
+                    rank={rank}
+                    onOpen={() => onOpenMovie(movie.id)}
+                    trailing={
+                      <span className="row-controls">
+                        <button type="button" aria-label="Move up" disabled={rank === 1} onClick={() => moveRankedItem(movie.id, 'up')}>
+                          ↑
                         </button>
-                      }
-                    />
-                  ))}
+                        <button
+                          type="button"
+                          aria-label="Move down"
+                          disabled={rank === rankedMovies.length}
+                          onClick={() => moveRankedItem(movie.id, 'down')}
+                        >
+                          ↓
+                        </button>
+                        <button type="button" aria-label="Remove from ranking" className="unrank-button" onClick={() => unrankMovie(movie.id)}>
+                          Unrank
+                        </button>
+                      </span>
+                    }
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DroppableZone>
+        </section>
+
+        <section className="ranking-section">
+          <h2>Unranked</h2>
+          <DroppableZone
+            id="zone-unranked"
+            empty={visibleUnrankedMovies.length === 0}
+            emptyLabel={unrankedMovies.length === 0 ? 'Every movie has been ranked.' : `No unranked movies match "${search.trim()}".`}
+          >
+            <SortableContext items={visibleUnrankedIds} strategy={verticalListSortingStrategy}>
+              {watchedMovies.length > 0 && (
+                <div className="ranking-subsection">
+                  <h3 className="ranking-subsection-label">Watched</h3>
+                  <div className="unranked-list">
+                    {watchedMovies.map((movie) => (
+                      <DraggableMovieRow
+                        key={movie.id}
+                        movie={movie}
+                        onOpen={() => onOpenMovie(movie.id)}
+                        trailing={
+                          <button type="button" className="rank-it-button" onClick={() => rankMovie(movie.id)}>
+                            Rank it
+                          </button>
+                        }
+                      />
+                    ))}
+                  </div>
                 </div>
-              </SortableContext>
-            </DroppableZone>
-          </section>
-        </DndContext>
-      ) : (
-        <CategoryPersonalRanking sortKey={sortKey} onOpenMovie={onOpenMovie} onRank={rankMovie} onUnrank={unrankMovie} />
-      )}
+              )}
+              {trulyUnrankedMovies.length > 0 && (
+                <div className="ranking-subsection">
+                  {watchedMovies.length > 0 && <h3 className="ranking-subsection-label">Unranked</h3>}
+                  <div className="unranked-list">
+                    {trulyUnrankedMovies.map((movie) => (
+                      <DraggableMovieRow
+                        key={movie.id}
+                        movie={movie}
+                        onOpen={() => onOpenMovie(movie.id)}
+                        trailing={
+                          <button type="button" className="rank-it-button" onClick={() => rankMovie(movie.id)}>
+                            Rank it
+                          </button>
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </SortableContext>
+          </DroppableZone>
+        </section>
+      </DndContext>
     </div>
   )
 }
@@ -294,57 +338,5 @@ function DroppableZone({
     <div ref={setNodeRef} className={`droppable-zone${isOver ? ' is-over' : ''}`}>
       {empty ? <p className="empty-state">{emptyLabel}</p> : children}
     </div>
-  )
-}
-
-function CategoryPersonalRanking({
-  sortKey,
-  onOpenMovie,
-  onRank,
-  onUnrank,
-}: {
-  sortKey: Exclude<SortKey, 'overall'>
-  onOpenMovie: (id: string) => void
-  onRank: (id: string) => void
-  onUnrank: (id: string) => void
-}) {
-  const { movies, myReviewsByMovieId, rankedIds } = useAppData()
-  const myReviews = useMemo(() => [...myReviewsByMovieId.values()], [myReviewsByMovieId])
-  const entries = useMemo(() => computeCategoryRanking(movies, myReviews, sortKey), [movies, myReviews, sortKey])
-  const rankedSet = new Set(rankedIds)
-
-  if (entries.length === 0) {
-    return <p className="empty-state">You haven't rated {SUBRATING_LABELS[sortKey]} on any movie yet.</p>
-  }
-
-  return (
-    <section className="ranking-section">
-      <h2>By {SUBRATING_LABELS[sortKey]}</h2>
-      <div className="ranked-list">
-        {entries.map((entry, index) => {
-          const isRanked = rankedSet.has(entry.movie.id)
-          return (
-            <MovieCard
-              key={entry.movie.id}
-              movie={entry.movie}
-              rank={index + 1}
-              subtitle={`${entry.average.toFixed(1)}/10${isRanked ? ` · ranked #${rankedIds.indexOf(entry.movie.id) + 1}` : ' · not ranked'}`}
-              onClick={() => onOpenMovie(entry.movie.id)}
-              trailing={
-                isRanked ? (
-                  <button type="button" className="unrank-button" onClick={() => onUnrank(entry.movie.id)}>
-                    Unrank
-                  </button>
-                ) : (
-                  <button type="button" className="rank-it-button" onClick={() => onRank(entry.movie.id)}>
-                    Rank it
-                  </button>
-                )
-              }
-            />
-          )
-        })}
-      </div>
-    </section>
   )
 }

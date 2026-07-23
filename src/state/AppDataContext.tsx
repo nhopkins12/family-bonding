@@ -3,12 +3,7 @@ import type { ReactNode } from 'react'
 import { fetchAuthSession } from 'aws-amplify/auth'
 import { client, type AppUserRecord, type MovieRecord, type RankingRecordFull, type ReviewRecordFull } from '../lib/dataClient'
 import { createUpsertQueue } from '../lib/upsertQueue'
-import { SUBRATING_KEYS, type Subratings } from '../types'
-
-interface ReviewInput {
-  text: string
-  subratings: Subratings
-}
+import type { SortKey } from '../types'
 
 interface AppDataContextValue {
   movies: MovieRecord[]
@@ -17,13 +12,13 @@ interface AppDataContextValue {
   myDisplayName: string
   isAdmin: boolean
   renameMe: (name: string) => Promise<void>
-  rankedIds: string[]
-  setMyRanking: (movieIds: string[]) => void
+  myRankingsByCategory: Map<SortKey, string[]>
+  setMyRanking: (category: SortKey, movieIds: string[]) => void
   profilesByOwner: Map<string, AppUserRecord>
   allRankings: RankingRecordFull[]
   allReviews: ReviewRecordFull[]
   myReviewsByMovieId: Map<string, ReviewRecordFull>
-  setMyReview: (movieId: string, input: ReviewInput) => Promise<void>
+  setMyReview: (movieId: string, text: string) => Promise<void>
   createMovie: (input: { title: string; year: number; actor: string; posterUrl: string }) => Promise<void>
   createMember: (input: { name: string; password: string; isAdmin: boolean }) => Promise<void>
 }
@@ -142,14 +137,20 @@ export function AppDataProvider({
     hasAttemptedProfileCreate.current = false
   }, [userId])
 
-  const myRankingRecord = useMemo(
-    () => (userId ? (rankings.find((r) => r.owner === userId) ?? null) : null),
-    [rankings, userId],
-  )
-  const rankedIds = useMemo(
-    () => (myRankingRecord?.orderedMovieIds ?? []).filter((id): id is string => Boolean(id)),
-    [myRankingRecord],
-  )
+  // One Ranking record per (owner, category) — 'overall' plus one per subrating category,
+  // all using the same relative drag-and-drop ordering.
+  const myRankingsByCategory = useMemo(() => {
+    const map = new Map<SortKey, string[]>()
+    if (!userId) return map
+    for (const ranking of rankings) {
+      if (ranking.owner !== userId || !ranking.category) continue
+      map.set(
+        ranking.category as SortKey,
+        (ranking.orderedMovieIds ?? []).filter((id): id is string => Boolean(id)),
+      )
+    }
+    return map
+  }, [rankings, userId])
 
   const myReviewsByMovieId = useMemo(() => {
     const map = new Map<string, ReviewRecordFull>()
@@ -177,34 +178,48 @@ export function AppDataProvider({
     [myProfile],
   )
 
-  // --- Ranking upsert: one queue for "my" ranking record, id locked in on first create. ---
-  const rankingIdRef = useRef<string | null>(null)
+  // --- Ranking upsert: one queue per category, created lazily, keyed by category —
+  // same pattern as the review queue below, keyed by movieId instead. ---
+  const rankingQueuesRef = useRef(new Map<string, ReturnType<typeof createUpsertQueue<string[]>>>())
+  const rankingIdsRef = useRef(new Map<string, string>())
+
   useEffect(() => {
-    if (myRankingRecord) rankingIdRef.current = myRankingRecord.id
-  }, [myRankingRecord])
+    if (!userId) return
+    for (const ranking of rankings) {
+      if (ranking.owner === userId && ranking.category) rankingIdsRef.current.set(ranking.category, ranking.id)
+    }
+  }, [rankings, userId])
+
   useEffect(() => {
-    rankingIdRef.current = null
+    rankingIdsRef.current.clear()
+    rankingQueuesRef.current.clear()
   }, [userId])
 
-  const rankingQueueRef = useRef(
-    createUpsertQueue<string[]>({
-      getExistingId: () => rankingIdRef.current,
-      create: async (orderedMovieIds) => {
-        const { data } = await client.models.Ranking.create({ orderedMovieIds })
-        return data!.id
-      },
-      update: async (id, orderedMovieIds) => {
-        await client.models.Ranking.update({ id, orderedMovieIds })
-      },
-    }),
-  )
+  function getRankingQueue(category: string) {
+    let queue = rankingQueuesRef.current.get(category)
+    if (!queue) {
+      queue = createUpsertQueue<string[]>({
+        getExistingId: () => rankingIdsRef.current.get(category) ?? null,
+        create: async (orderedMovieIds) => {
+          const { data } = await client.models.Ranking.create({ category, orderedMovieIds })
+          rankingIdsRef.current.set(category, data!.id)
+          return data!.id
+        },
+        update: async (id, orderedMovieIds) => {
+          await client.models.Ranking.update({ id, orderedMovieIds })
+        },
+      })
+      rankingQueuesRef.current.set(category, queue)
+    }
+    return queue
+  }
 
-  const setMyRanking = useCallback((movieIds: string[]) => {
-    rankingQueueRef.current(movieIds).catch((err) => console.error('Failed to save ranking', err))
+  const setMyRanking = useCallback((category: SortKey, movieIds: string[]) => {
+    getRankingQueue(category)(movieIds).catch((err) => console.error('Failed to save ranking', err))
   }, [])
 
   // --- Review upsert: one queue per movie, created lazily, keyed by movieId. ---
-  const reviewQueuesRef = useRef(new Map<string, ReturnType<typeof createUpsertQueue<ReviewInput>>>())
+  const reviewQueuesRef = useRef(new Map<string, ReturnType<typeof createUpsertQueue<string>>>())
   const reviewIdsRef = useRef(new Map<string, string>())
 
   useEffect(() => {
@@ -221,17 +236,15 @@ export function AppDataProvider({
   function getReviewQueue(movieId: string) {
     let queue = reviewQueuesRef.current.get(movieId)
     if (!queue) {
-      queue = createUpsertQueue<ReviewInput>({
+      queue = createUpsertQueue<string>({
         getExistingId: () => reviewIdsRef.current.get(movieId) ?? null,
-        create: async (input) => {
-          const categoryFields = Object.fromEntries(SUBRATING_KEYS.map((key) => [key, input.subratings[key] ?? null]))
-          const { data } = await client.models.Review.create({ movieId, text: input.text, ...categoryFields })
+        create: async (text) => {
+          const { data } = await client.models.Review.create({ movieId, text })
           reviewIdsRef.current.set(movieId, data!.id)
           return data!.id
         },
-        update: async (id, input) => {
-          const categoryFields = Object.fromEntries(SUBRATING_KEYS.map((key) => [key, input.subratings[key] ?? null]))
-          await client.models.Review.update({ id, text: input.text, ...categoryFields })
+        update: async (id, text) => {
+          await client.models.Review.update({ id, text })
         },
       })
       reviewQueuesRef.current.set(movieId, queue)
@@ -239,8 +252,8 @@ export function AppDataProvider({
     return queue
   }
 
-  const setMyReview = useCallback((movieId: string, input: ReviewInput) => {
-    return getReviewQueue(movieId)(input).catch((err) => {
+  const setMyReview = useCallback((movieId: string, text: string) => {
+    return getReviewQueue(movieId)(text).catch((err) => {
       console.error('Failed to save review', err)
       throw err
     })
@@ -269,7 +282,7 @@ export function AppDataProvider({
       myDisplayName: myProfile?.displayName ?? deriveDefaultName(loginId),
       isAdmin,
       renameMe,
-      rankedIds,
+      myRankingsByCategory,
       setMyRanking,
       profilesByOwner,
       allRankings: rankings,
@@ -287,7 +300,7 @@ export function AppDataProvider({
       loginId,
       isAdmin,
       renameMe,
-      rankedIds,
+      myRankingsByCategory,
       setMyRanking,
       profilesByOwner,
       rankings,
