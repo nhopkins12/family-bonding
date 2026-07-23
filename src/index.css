@@ -305,6 +305,12 @@ h3 {
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   min-width: 200px;
+  /* Without a cap this just takes on its content's natural width (up to 260px from
+     .account-signin-wrap alone) — fine on desktop, but on a narrow phone that reads as
+     a dropdown about to run off the left edge of the screen. Capping it and letting
+     .account-signin-wrap's own max-width:80vw do the rest keeps a comfortable margin
+     on both sides regardless of viewport width. */
+  max-width: min(320px, calc(100vw - 2 * var(--space-4)));
   padding: var(--space-2);
   display: flex;
   flex-direction: column;
@@ -338,7 +344,11 @@ h3 {
 .theme-toggle button {
   background: none;
   border: none;
-  padding: 0.25rem var(--space-2);
+  /* min-height:unset opts out of the base button rule's 2.25rem — reasonable for a
+     tight segmented control on desktop, but landed under 30px tall, below a comfortable
+     tap target. Taller padding instead of restoring the full min-height keeps it
+     reading as a compact control while still being easy to tap accurately. */
+  padding: 0.5rem var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-muted);
   min-height: unset;
@@ -350,14 +360,23 @@ h3 {
   font-weight: 600;
 }
 
+/* A bare native checkbox is ~13-16px — well under a comfortable tap target. The label
+   (already the whole clickable hit area, since the input is nested inside it) gets a
+   min box matching this site's other buttons' 2.25rem (36px) min-height, so tapping
+   near the checkbox — not just squarely on its tiny visual box — still registers. */
 .animations-toggle {
   display: flex;
   align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
   cursor: pointer;
 }
 
 .animations-toggle input {
   margin: 0;
+  width: 1.15rem;
+  height: 1.15rem;
   cursor: pointer;
 }
 
@@ -709,12 +728,29 @@ h3 {
   background: var(--bg-hover);
 }
 
-.movie-card-draggable {
+/* touch-action:none used to live on the whole row (.movie-card-draggable) — meaning
+   ANY vertical swipe starting anywhere on a card, including one meant to scroll past
+   it, got captured as a drag attempt instead, with no way to tell the two apart. That
+   was most painful in Unranked specifically, since it's normally the longest list.
+   Moving touch-action:none and the drag listeners onto just the poster button (no
+   separate handle icon — the poster is already there and is a small, obvious enough
+   target) fixes both: touching the rest of the row scrolls normally like any other
+   content, and the poster is the one deliberate target you grab to drag. */
+.movie-card-poster-button {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: unset;
+  border-radius: var(--radius-sm);
+}
+
+.movie-card-draggable .movie-card-poster-button {
   cursor: grab;
   touch-action: none;
 }
 
-.movie-card-draggable:active {
+.movie-card-draggable .movie-card-poster-button:active {
   cursor: grabbing;
 }
 
@@ -739,7 +775,6 @@ h3 {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
   background: none;
   border: none;
   padding: 0;
@@ -1442,13 +1477,13 @@ h3 {
 .subrating-row input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--bg-elevated);
   box-shadow: 0 0 0 1px var(--accent);
-  margin-top: -6px;
+  margin-top: -8px;
   cursor: pointer;
   transition: transform 0.1s ease;
 }
@@ -1458,8 +1493,8 @@ h3 {
 }
 
 .subrating-row input[type='range']::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--bg-elevated);
@@ -1578,15 +1613,51 @@ h3 {
     text-align: center;
   }
 
-  .score-row,
-  .subrating-row {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
+  /* Full 1fr single-column stacking (label, then bar/slider, then value, then —
+     for subrating-row — the clear button) turned a 10-row review form into an
+     enormous scroll: 4 stacked lines per row, each with its own gap, and the
+     clear button still reserving a full row of height even while invisible.
+     label+value(+clear) on one line and the bar/slider spanning full width
+     below cuts that to 2 lines per row — the slider still gets the full width
+     it needs for touch precision, without every row ballooning the page. */
+  .score-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'label value' 'track track';
+    gap: 0.2rem var(--space-2);
   }
 
-  .score-row-value,
+  .score-row-label {
+    grid-area: label;
+  }
+
+  .score-row-value {
+    grid-area: value;
+  }
+
+  .score-row-track {
+    grid-area: track;
+  }
+
+  .subrating-row {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas: 'label value clear' 'slider slider slider';
+    gap: 0.2rem var(--space-2);
+  }
+
+  .subrating-row-label {
+    grid-area: label;
+  }
+
   .subrating-row-value {
-    text-align: left;
+    grid-area: value;
+  }
+
+  .subrating-row-clear {
+    grid-area: clear;
+  }
+
+  .subrating-row input[type='range'] {
+    grid-area: slider;
   }
 }
 
