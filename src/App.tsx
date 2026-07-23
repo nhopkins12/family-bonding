@@ -144,10 +144,36 @@ export default function App() {
   // Captured once at startup — the loading splash shouldn't swap mid-flight
   // if the system theme changes (or the user toggles it) while it's playing.
   const [introTheme] = useState(theme)
+  // The gun-barrel splash uses a real image sized to exactly fill the viewport,
+  // which is what all of the mobile-only splash bugs (dvh/vh centering, the
+  // rubber-band bounce gap) traced back to. The dots splash draws its hole with
+  // a box-shadow that bleeds thousands of px past any real viewport, so it has
+  // none of that fragility — use it everywhere on a touch/coarse-pointer device
+  // regardless of theme, and keep the theme-based choice for desktop, where none
+  // of those issues exist in the first place.
+  const [isMobile] = useState(() => window.matchMedia('(pointer: coarse)').matches)
   // If animations are off, skip the splash outright rather than mounting an
   // animated component and letting the near-zero-duration CSS override race
   // through it — cleaner to just not show it at all.
   const [showIntro, setShowIntro] = useState(animationsEnabled)
+
+  // <meta name="theme-color"> (in index.html) is pinned to a static dark value,
+  // matching the splash's black background — but it never updated again after
+  // that, so a light-theme session stayed marked as dark forever. On Android
+  // Chrome that meta tag directly colors the browser's own toolbar in any
+  // regular tab, and even where a platform ignores the tag itself (iOS Safari
+  // in a normal tab reportedly does, per the note in index.html) it can still
+  // only pick up a lighter tint once the real page content near the top/bottom
+  // edges has actually settled into its final color — so updating this the
+  // instant the splash finishes, rather than never, is a real (if
+  // platform-limited) improvement either way. Held off while showIntro is true
+  // so it doesn't flip light while the screen is still mostly the black splash.
+  useEffect(() => {
+    if (showIntro) return
+    const meta = document.querySelector('meta[name="theme-color"]')
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+    if (meta && bg) meta.setAttribute('content', bg)
+  }, [showIntro, theme])
 
   if (!isBackendConfigured) {
     return <NotDeployedScreen />
@@ -165,7 +191,7 @@ export default function App() {
         onSetAnimationsEnabled={setAnimationsEnabled}
       />
       {showIntro &&
-        (introTheme === 'dark' ? (
+        (isMobile || introTheme === 'dark' ? (
           <DotsSweepLoader loading={auth.status === 'loading'} onDone={() => setShowIntro(false)} />
         ) : (
           <GunBarrelLoader loading={auth.status === 'loading'} onFinish={() => setShowIntro(false)} />

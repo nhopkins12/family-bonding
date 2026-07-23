@@ -10,18 +10,14 @@ interface MovieCardProps {
   onClick?: () => void
   draggable?: boolean
   overlay?: boolean
-  /** Spread onto the poster button specifically — see DraggableMovieRow for why only
-   * this small area (not the whole row) should claim the touch gesture for dragging,
-   * leaving the rest of the row free to scroll normally like any other content. */
-  dragHandleProps?: Record<string, unknown>
 }
 
-export function MovieCard({ movie, rank, subtitle, trailing, onClick, draggable, overlay, dragHandleProps }: MovieCardProps) {
+export function MovieCard({ movie, rank, subtitle, trailing, onClick, draggable, overlay }: MovieCardProps) {
   const className = ['movie-card', draggable && 'movie-card-draggable', overlay && 'movie-card-overlay'].filter(Boolean).join(' ')
   return (
     <div className={className}>
       {rank !== undefined && <span className="rank-badge">{rank}</span>}
-      <button type="button" className="movie-card-poster-button" onClick={onClick} {...dragHandleProps}>
+      <button type="button" className="movie-card-poster-button" onClick={onClick}>
         <PosterImage movie={movie} size="sm" />
       </button>
       <button type="button" className="movie-card-main" onClick={onClick}>

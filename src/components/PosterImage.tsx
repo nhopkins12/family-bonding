@@ -24,6 +24,7 @@ export function PosterImage({ movie, size = 'sm' }: PosterImageProps) {
       src={movie.posterUrl ?? undefined}
       alt={`${movie.title} poster`}
       loading="lazy"
+      draggable={false}
       onError={() => setFailed(true)}
     />
   )
