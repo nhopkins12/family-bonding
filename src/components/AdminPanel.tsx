@@ -73,10 +73,6 @@ function AddMemberForm() {
             required
           />
         </label>
-        <p className="admin-form-hint">
-          This becomes their permanent sign-in name. They can set their own display name — what actually shows up around
-          the app — after signing in.
-        </p>
         <label>
           Password
           <input
@@ -96,12 +92,7 @@ function AddMemberForm() {
         </button>
       </form>
       {status === 'error' && <p className="admin-form-error">{error}</p>}
-      {lastCreated && status === 'idle' && (
-        <p className="admin-form-success">
-          {lastCreated} was added. Tell them their password directly — no email was sent. They can sign in and set their own
-          display name.
-        </p>
-      )}
+      {lastCreated && status === 'idle' && <p className="admin-form-success">{lastCreated} was added.</p>}
     </>
   )
 }

@@ -132,6 +132,17 @@ body,
   height: 100%;
 }
 
+/* Stops mobile Safari/Chrome's pull-to-refresh rubber-band bounce at the top of the
+   page. That bounce temporarily scrolls the visual viewport past its normal bounds,
+   which can reveal a gap above position:fixed full-screen overlays (the gun-barrel
+   intro splash, most visibly) since the browser's own bounce animation isn't
+   something a fixed element's inset:0 can track. Disabling it site-wide is standard
+   practice for an app-like SPA that has no real use for that gesture anyway. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -1547,13 +1558,6 @@ h3 {
   border-color: var(--accent-solid-hover);
 }
 
-.admin-form-hint {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  margin-top: calc(-1 * var(--space-2));
-  max-width: 420px;
-}
-
 .admin-form-error {
   color: var(--danger);
   font-size: var(--text-sm);
@@ -1593,16 +1597,27 @@ h3 {
    padded with 6000px of opaque black on *both* sides (so neither true edge
    ever scrolls into view, at rest or while panning, even on an ultrawide
    viewport) for a total 15500x1080. Displayed at
-   height:100vh its aperture center sits at 790.97vh from the image's own left
-   edge (measured from the padded art) and exactly mid-height, so
-   translateX(-790.97vh) with the image's left edge pinned to 50vw lands the
+   height:100dvh its aperture center sits at 790.97dvh from the image's own
+   left edge (measured from the padded art) and exactly mid-height, so
+   translateX(-790.97dvh) with the image's left edge pinned to 50% lands the
    hole dead-center; it pans in from the right by starting that translateX
-   100vw further right and animating down to rest. Everywhere else the image
+   100dvw further right and animating down to rest. Everywhere else the image
    is opaque black, so the app is only visible through the moving hole — a
    real window onto the page loading behind it, not a staged scene. Once
    loading finishes, the barrel scales away from that same hole point
    (transform-origin matches the translateX distance) like an iris snapping
-   open, clearing to reveal the app underneath. */
+   open, clearing to reveal the app underneath.
+
+   Every length below is in dvh/dvw, not vh/vw — mixing the two was the actual
+   centering bug on mobile. vh/vw default to the *largest possible* viewport
+   (ignoring the address bar), while the element's own height is set with dvh
+   (the real, current viewport, matching what's actually visible on screen —
+   see below). Since the image's rendered width scales proportionally to
+   whatever height it's actually drawn at, sizing it with dvh but positioning
+   it with vh meant the pan math was calibrated for a taller image than the
+   one really on screen whenever the two units disagreed — which on mobile is
+   most of the time, since the address bar is showing on a fresh load (i.e.
+   exactly "right after a refresh"). */
 .gunbarrel {
   position: fixed;
   inset: 0;
@@ -1620,8 +1635,8 @@ h3 {
   position: fixed;
   top: 50%;
   left: 50%;
-  width: 10vh;
-  height: 10vh;
+  width: 10dvh;
+  height: 10dvh;
   z-index: 1;
   transform: translate(-50%, -50%);
   opacity: 0;
@@ -1658,7 +1673,7 @@ h3 {
   height: 100dvh;
   width: auto;
   z-index: 3;
-  transform-origin: 790.97vh 50%;
+  transform-origin: 790.97dvh 50%;
   animation: gb-pan 0.85s ease-out both;
 }
 
@@ -1666,24 +1681,24 @@ h3 {
   animation: gb-pan 0.85s ease-out both, gb-open 0.5s ease-in both;
 }
 
-/* Pans in from the right: 'from' starts shifted further right (+100vw) of the
-   hole's resting offset, then settles to -790.97vh (hole centered) — moving
+/* Pans in from the right: 'from' starts shifted further right (+100dvw) of the
+   hole's resting offset, then settles to -790.97dvh (hole centered) — moving
    leftward across the screen as it travels. */
 @keyframes gb-pan {
   from {
-    transform: translateX(calc(-790.97vh + 100vw));
+    transform: translateX(calc(-790.97dvh + 100dvw));
   }
   to {
-    transform: translateX(-790.97vh);
+    transform: translateX(-790.97dvh);
   }
 }
 
 @keyframes gb-open {
   from {
-    transform: translateX(-790.97vh) scale(1);
+    transform: translateX(-790.97dvh) scale(1);
   }
   to {
-    transform: translateX(-790.97vh) scale(9);
+    transform: translateX(-790.97dvh) scale(9);
   }
 }
 
