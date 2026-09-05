@@ -75,20 +75,14 @@ function AddMemberForm() {
         </label>
         <label>
           Password
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="At least 6 characters"
-            minLength={6}
-            required
-          />
+          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} required />
         </label>
         <label className="admin-form-checkbox">
           <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
           Give admin access
         </label>
         <button type="submit" className="admin-form-submit" disabled={status === 'saving'}>
-          {status === 'saving' ? 'Adding…' : 'Add member'}
+          {status === 'saving' ? 'Adding...' : 'Add member'}
         </button>
       </form>
       {status === 'error' && <p className="admin-form-error">{error}</p>}
@@ -139,7 +133,7 @@ function AddMovieForm() {
           <input value={posterUrl} onChange={(e) => setPosterUrl(e.target.value)} placeholder="Optional" />
         </label>
         <button type="submit" className="admin-form-submit" disabled={status === 'saving'}>
-          {status === 'saving' ? 'Adding…' : 'Add movie'}
+          {status === 'saving' ? 'Adding...' : 'Add movie'}
         </button>
       </form>
       {lastAdded && status === 'idle' && <p className="admin-form-success">{lastAdded} was added to the ranking.</p>}

@@ -14,12 +14,13 @@
  */
 import { readFileSync } from 'node:fs'
 import { Amplify } from 'aws-amplify'
-import { signIn } from 'aws-amplify/auth'
+import { getCurrentUser, signIn } from 'aws-amplify/auth'
 import { generateClient } from 'aws-amplify/data'
 import type { Schema } from '../amplify/data/resource'
 import outputs from '../amplify_outputs.json'
 import { SUBRATING_KEYS } from '../src/types'
 import { resolveLoginIdentifier } from '../src/lib/memberLogin'
+import { isNewerRecord } from '../src/lib/records'
 
 Amplify.configure(outputs)
 
@@ -55,11 +56,25 @@ async function main() {
   }
 
   await signIn({ username: resolveLoginIdentifier(name), password })
+  const user = await getCurrentUser()
   const client = generateClient<Schema>()
 
-  const { data: movies } = await client.models.Movie.list()
+  const [{ data: movies }, { data: existingRankings }, { data: existingReviews }] = await Promise.all([
+    client.models.Movie.list(),
+    client.models.Ranking.list(),
+    client.models.Review.list(),
+  ])
   const movieIdByTitle = new Map(movies.map((m) => [m.title, m.id]))
   const legacyTitleBySlug = new Map((legacy.movies ?? []).map((m) => [m.id, m.title]))
+  const existingRanking = existingRankings
+    .filter((ranking) => ranking.owner === user.userId)
+    .reduce<(typeof existingRankings)[number] | null>((latest, ranking) => (!latest || isNewerRecord(ranking, latest) ? ranking : latest), null)
+  const existingReviewsByMovieId = new Map<string, (typeof existingReviews)[number]>()
+  for (const review of existingReviews) {
+    if (review.owner !== user.userId) continue
+    const existing = existingReviewsByMovieId.get(review.movieId)
+    if (!existing || isNewerRecord(review, existing)) existingReviewsByMovieId.set(review.movieId, review)
+  }
 
   function resolveMovieId(slugId: string): string | undefined {
     const title = legacyTitleBySlug.get(slugId)
@@ -70,9 +85,11 @@ async function main() {
   const orderedMovieIds = rankedSlugIds.map(resolveMovieId).filter((id): id is string => Boolean(id))
 
   if (orderedMovieIds.length > 0) {
-    const { errors } = await client.models.Ranking.create({ orderedMovieIds })
+    const { errors } = existingRanking
+      ? await client.models.Ranking.update({ id: existingRanking.id, orderedMovieIds })
+      : await client.models.Ranking.create({ id: user.userId, orderedMovieIds })
     if (errors) console.error('Failed to import ranking:', errors)
-    else console.log(`Imported ${orderedMovieIds.length} ranked movie(s).`)
+    else console.log(`${existingRanking ? 'Updated' : 'Imported'} ${orderedMovieIds.length} ranked movie(s).`)
   } else {
     console.log('No ranked movies to import for this profile.')
   }
@@ -84,12 +101,16 @@ async function main() {
     if (!movieId) continue
 
     const categoryFields = Object.fromEntries(SUBRATING_KEYS.map((key) => [key, review.subratings?.[key] ?? null]))
+    const existingReview = existingReviewsByMovieId.get(movieId)
 
-    const { errors } = await client.models.Review.create({
-      movieId,
-      text: review.text ?? '',
-      ...categoryFields,
-    })
+    const { errors } = existingReview
+      ? await client.models.Review.update({ id: existingReview.id, text: review.text ?? '', ...categoryFields })
+      : await client.models.Review.create({
+          id: `${user.userId}_${movieId}`,
+          movieId,
+          text: review.text ?? '',
+          ...categoryFields,
+        })
     if (errors) {
       console.error(`Failed to import review for "${slugId}":`, errors)
       continue

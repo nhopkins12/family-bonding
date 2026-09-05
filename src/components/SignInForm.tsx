@@ -44,7 +44,7 @@ export function SignInForm() {
     try {
       await confirmSignIn({ challengeResponse: newPassword })
     } catch {
-      setError('Could not set that password — try a longer one.')
+      setError('Could not set that password. Try a longer one.')
     } finally {
       setSubmitting(false)
     }

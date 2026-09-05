@@ -4,6 +4,7 @@ export const SUBRATING_KEYS = [
   'villain',
   'action',
   'themeSong',
+  'gadgets',
   'rewatchability',
   'datedness',
   'misogyny',
@@ -20,6 +21,7 @@ export const SUBRATING_LABELS: Record<SubratingKey, string> = {
   villain: 'Villain',
   action: 'Action',
   themeSong: 'Theme Song',
+  gadgets: 'Gadgets',
   rewatchability: 'Rewatchability',
   datedness: 'Datedness',
   misogyny: 'Misogyny',
@@ -39,13 +41,13 @@ export const INVERTED_SUBRATINGS: ReadonlySet<SubratingKey> = new Set([
 export type SortKey = 'overall' | SubratingKey
 
 /** Sort-menu labels, framed by direction ("Best X" for positive categories, "Most X" for descriptive ones). */
-export const SORT_LABELS: Record<SortKey, string> = {
-  overall: 'Overall',
+export const SORT_LABELS: Record<SubratingKey, string> = {
   story: 'Best Story',
   bond: 'Best Bond',
   villain: 'Best Villain',
   action: 'Best Action',
   themeSong: 'Best Theme Song',
+  gadgets: 'Best Gadgets',
   rewatchability: 'Most Rewatchable',
   datedness: 'Most Dated',
   misogyny: 'Most Misogynistic',
@@ -54,7 +56,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
 }
 
 export const SORT_OPTIONS: readonly { key: SortKey; label: string }[] = [
-  { key: 'overall', label: SORT_LABELS.overall },
+  { key: 'overall', label: 'Overall' },
   ...SUBRATING_KEYS.map((key) => ({ key, label: SORT_LABELS[key] })),
 ]
 

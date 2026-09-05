@@ -13,6 +13,8 @@
     "amplify:typecheck": "tsc --noEmit -p amplify/tsconfig.json",
     "create-admin-user": "tsx scripts/create-admin-user.ts",
     "seed-movies": "tsx scripts/seed-movies.ts",
+    "cleanup-backend-data": "tsx scripts/cleanup-backend-data.ts",
+    "backfill-watched-dates": "tsx scripts/backfill-watched-dates.ts",
     "update-movie-posters": "tsx scripts/update-movie-posters.ts",
     "migrate-legacy-export": "tsx scripts/migrate-legacy-export.ts",
     "postinstall": "node scripts/copy-dictionary.js"

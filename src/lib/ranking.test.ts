@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MovieLike, RankingRecord, ReviewRecord } from './ranking'
-import { computeCategoryRanking, computeGroupRanking, computeMovieCategoryAverages } from './ranking'
+import { computeCategoryRanking, computeMovieCategoryAverages, computePairwiseRanking } from './ranking'
 
 function movie(id: string, title: string): MovieLike {
   return { id, title }
@@ -8,65 +8,60 @@ function movie(id: string, title: string): MovieLike {
 
 const movies: MovieLike[] = [movie('a', 'Alpha'), movie('b', 'Bravo'), movie('c', 'Charlie'), movie('d', 'Delta')]
 
-describe('computeGroupRanking', () => {
-  it('averages rank positions across users who ranked a movie', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['a', 'b', 'c'] }, { orderedMovieIds: ['b', 'a', 'c'] }]
-    const result = computeGroupRanking(movies, rankings)
-
-    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
-    expect(byId.a.averageRank).toBe(1.5)
-    expect(byId.b.averageRank).toBe(1.5)
-    expect(byId.c.averageRank).toBe(3)
-  })
-
-  it('excludes movies a user did not rank from that user contribution', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['a', 'b'] }, { orderedMovieIds: ['b'] }]
-    const result = computeGroupRanking(movies, rankings)
-    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
-
-    expect(byId.a.averageRank).toBe(1)
-    expect(byId.a.reviewerCount).toBe(1)
-    expect(byId.b.averageRank).toBe(1.5)
-    expect(byId.b.reviewerCount).toBe(2)
-  })
-
+describe('computePairwiseRanking', () => {
   it('omits movies nobody has ranked', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['a'] }]
-    const result = computeGroupRanking(movies, rankings)
+    const rankings: RankingRecord[] = [{ owner: 'u1', orderedMovieIds: ['a'] }]
+    const result = computePairwiseRanking(movies, rankings)
     expect(result.map((e) => e.movie.id)).toEqual(['a'])
   })
 
-  it('does not require every user to have ranked every movie', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['a'] }, { orderedMovieIds: ['a', 'b', 'c'] }]
-    const result = computeGroupRanking(movies, rankings)
-    expect(result.map((e) => e.movie.id).sort()).toEqual(['a', 'b', 'c'])
-  })
-
   it('handles null/missing ranking data gracefully', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: null }, { orderedMovieIds: ['a', null, 'b'] }, {}]
-    const result = computeGroupRanking(movies, rankings)
-    expect(result.map((e) => e.movie.id)).toEqual(['a', 'b'])
+    const rankings: RankingRecord[] = [{ owner: 'u1', orderedMovieIds: null }, { owner: 'u2', orderedMovieIds: ['a', null, 'b'] }, {}]
+    const result = computePairwiseRanking(movies, rankings)
+    expect(result.map((e) => e.movie.id).sort()).toEqual(['a', 'b'])
   })
 
-  it('sorts by lowest average rank first', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['c', 'a', 'b'] }]
-    const result = computeGroupRanking(movies, rankings)
-    expect(result.map((e) => e.movie.id)).toEqual(['c', 'a', 'b'])
-  })
-
-  it('breaks ties alphabetically by title', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['b', 'a'] }, { orderedMovieIds: ['a', 'b'] }]
-    const result = computeGroupRanking(movies, rankings)
-    expect(result[0].movie.id).toBe('a')
-    expect(result[1].movie.id).toBe('b')
-  })
-
-  it('reports the number of users included in the average', () => {
-    const rankings: RankingRecord[] = [{ orderedMovieIds: ['a'] }, { orderedMovieIds: ['a'] }, { orderedMovieIds: ['b'] }]
-    const result = computeGroupRanking(movies, rankings)
+  it('counts a movie only once per ranking record if duplicate ids are present', () => {
+    const result = computePairwiseRanking(movies, [{ owner: 'u1', orderedMovieIds: ['a', 'a', 'b'] }])
     const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
-    expect(byId.a.reviewerCount).toBe(2)
-    expect(byId.b.reviewerCount).toBe(1)
+
+    expect(byId.a.wins).toBe(1)
+    expect(byId.a.reviewerCount).toBe(1)
+  })
+
+  it('ranks by head-to-head placements instead of raw position values', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a', 'b', 'c'] },
+      { owner: 'u2', orderedMovieIds: ['b', 'a', 'c'] },
+      { owner: 'u3', orderedMovieIds: ['b', 'c', 'a'] },
+    ]
+    const result = computePairwiseRanking(movies, rankings)
+
+    expect(result[0].movie.id).toBe('b')
+    expect(result[0]).toMatchObject({ wins: 5, losses: 1, matchupCount: 6, reviewerCount: 3 })
+  })
+
+  it('lets a shorter list contribute only comparisons it actually contains', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a', 'b', 'c', 'd'] },
+      { owner: 'u2', orderedMovieIds: ['b', 'a'] },
+    ]
+    const result = computePairwiseRanking(movies, rankings)
+    const byId = Object.fromEntries(result.map((entry) => [entry.movie.id, entry]))
+
+    expect(byId.b.wins).toBe(3)
+    expect(byId.b.losses).toBe(1)
+    expect(byId.b.reviewerCount).toBe(2)
+    expect(byId.d.reviewerCount).toBe(1)
+  })
+
+  it('uses only the latest ranking per owner', () => {
+    const result = computePairwiseRanking(movies, [
+      { id: 'old', owner: 'u1', updatedAt: '2026-01-01T00:00:00.000Z', orderedMovieIds: ['a', 'b'] },
+      { id: 'new', owner: 'u1', updatedAt: '2026-01-02T00:00:00.000Z', orderedMovieIds: ['b', 'a'] },
+    ])
+
+    expect(result.map((entry) => entry.movie.id)).toEqual(['b', 'a'])
   })
 })
 
@@ -157,6 +152,23 @@ describe('computeCategoryRanking', () => {
     const result = computeCategoryRanking(movies, reviews, 'villain')
     expect(result.map((e) => e.movie.id)).toEqual(['a', 'b'])
   })
+
+  it('averages the Gadgets category', () => {
+    const reviews: ReviewRecord[] = [{ movieId: 'a', gadgets: 9 }, { movieId: 'a', gadgets: 7 }]
+    const result = computeCategoryRanking(movies, reviews, 'gadgets')
+    expect(result[0]).toMatchObject({ average: 8, reviewerCount: 2 })
+  })
+
+  it('uses only the latest review per owner and movie for category counts', () => {
+    const reviews: ReviewRecord[] = [
+      { id: 'old', owner: 'u1', movieId: 'a', updatedAt: '2026-01-01T00:00:00.000Z', story: 2 },
+      { id: 'new', owner: 'u1', movieId: 'a', updatedAt: '2026-01-02T00:00:00.000Z', story: 8 },
+      { id: 'u2', owner: 'u2', movieId: 'a', updatedAt: '2026-01-01T00:00:00.000Z', story: 6 },
+    ]
+    const result = computeCategoryRanking(movies, reviews, 'story')
+
+    expect(result[0]).toMatchObject({ average: 7, reviewerCount: 2 })
+  })
 })
 
 describe('computeMovieCategoryAverages', () => {
@@ -170,5 +182,16 @@ describe('computeMovieCategoryAverages', () => {
     expect(result.story).toEqual({ average: 7, reviewerCount: 2 })
     expect(result.misogyny).toEqual({ average: 3, reviewerCount: 2 })
     expect(result.action).toBeNull()
+  })
+
+  it('uses only the latest review per owner and movie for detail averages', () => {
+    const reviews: ReviewRecord[] = [
+      { id: 'old', owner: 'u1', movieId: 'a', updatedAt: '2026-01-01T00:00:00.000Z', story: 2 },
+      { id: 'new', owner: 'u1', movieId: 'a', updatedAt: '2026-01-02T00:00:00.000Z', story: 10 },
+      { id: 'u2', owner: 'u2', movieId: 'a', updatedAt: '2026-01-01T00:00:00.000Z', story: 6 },
+    ]
+    const result = computeMovieCategoryAverages('a', reviews, ['story'])
+
+    expect(result.story).toEqual({ average: 8, reviewerCount: 2 })
   })
 })

@@ -236,6 +236,6 @@ export function MyReviewModal({ movieId, onClose }: MyReviewModalProps) {
 function SaveStatusLabel({ status }: { status: SaveStatus }) {
   if (status === 'idle') return null
   if (status === 'pending') return <span className="save-status">Saving…</span>
-  if (status === 'error') return <span className="save-status save-status-error">Couldn't save — check your connection</span>
+  if (status === 'error') return <span className="save-status save-status-error">Couldn't save, check your connection</span>
   return <span className="save-status save-status-saved">Saved</span>
 }

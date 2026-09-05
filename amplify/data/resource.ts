@@ -63,11 +63,43 @@ const schema = a.schema({
       villain: a.integer(),
       action: a.integer(),
       themeSong: a.integer(),
+      gadgets: a.integer(),
       rewatchability: a.integer(),
       datedness: a.integer(),
       misogyny: a.integer(),
       culturalInsensitivity: a.integer(),
       campiness: a.integer(),
+    })
+    .secondaryIndexes((index) => [index('movieId')])
+    .authorization((allow) => [
+      allow.owner(),
+      allow.guest().to(['read']),
+      allow.authenticated().to(['read']),
+      allow.groups(['Admins']),
+    ]),
+
+  MovieWatch: a
+    .model({
+      // Optional: absent means "this date is reserved for a vote — no movie chosen
+      // yet" (status 'voting'). Once a movie is picked this gets filled in and the
+      // row becomes an ordinary scheduled/watched night, same as any other.
+      movieId: a.string(),
+      status: a.string().required(),
+      scheduledFor: a.string(),
+      watchedAt: a.string(),
+      notes: a.string(),
+    })
+    .secondaryIndexes((index) => [index('movieId')])
+    .authorization((allow) => [
+      allow.guest().to(['read']),
+      allow.authenticated().to(['read']),
+      allow.groups(['Admins']).to(['create', 'update', 'delete']),
+    ]),
+
+  WatchVote: a
+    .model({
+      movieId: a.string().required(),
+      vote: a.string().required(),
     })
     .secondaryIndexes((index) => [index('movieId')])
     .authorization((allow) => [
