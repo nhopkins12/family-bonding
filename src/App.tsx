@@ -11,6 +11,7 @@ import { AdminPanel } from './components/AdminPanel'
 import { RankingBoard } from './components/RankingBoard'
 import { GroupRanking } from './components/GroupRanking'
 import { MembersList } from './components/MembersList'
+import { WatchPlanner } from './components/WatchPlanner'
 import { MemberRankingPage } from './components/MemberRankingPage'
 import { MovieDetailModal } from './components/MovieDetailModal'
 import { MyReviewModal } from './components/MyReviewModal'
@@ -19,7 +20,7 @@ import { GunBarrelLoader } from './components/GunBarrelLoader'
 import { DotsSweepLoader } from './components/DotsSweepLoader'
 
 type Page =
-  | { kind: 'browse'; tab: 'global' | 'members' }
+  | { kind: 'browse'; tab: 'global' | 'next' | 'members' }
   | { kind: 'my-rankings' }
   | { kind: 'member-ranking'; ownerId: string }
 
@@ -61,6 +62,9 @@ function AppShell({
   function openMembers() {
     setPage({ kind: 'browse', tab: 'members' })
   }
+  function openNext() {
+    setPage({ kind: 'browse', tab: 'next' })
+  }
   function openMember(ownerId: string) {
     setOverlay(null)
     setPage({ kind: 'member-ranking', ownerId })
@@ -91,6 +95,9 @@ function AppShell({
               <button type="button" className={page.tab === 'global' ? 'active' : ''} onClick={openGlobal}>
                 Ranking
               </button>
+              <button type="button" className={page.tab === 'next' ? 'active' : ''} onClick={openNext}>
+                Upcoming
+              </button>
               <button type="button" className={page.tab === 'members' ? 'active' : ''} onClick={openMembers}>
                 Members
               </button>
@@ -98,6 +105,9 @@ function AppShell({
 
             <main className="app-main">
               {page.tab === 'global' && <GroupRanking onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />}
+              {page.tab === 'next' && (
+                <WatchPlanner onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} onOpenProfile={openMember} />
+              )}
               {page.tab === 'members' && <MembersList onOpenMember={openMember} />}
             </main>
           </>

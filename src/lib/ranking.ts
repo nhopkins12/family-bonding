@@ -1,4 +1,5 @@
 import type { SubratingKey } from '../types'
+import { latestByKey, type TimestampedRecord } from './records'
 
 export interface MovieLike {
   id: string
@@ -6,62 +7,94 @@ export interface MovieLike {
 }
 
 /** A user's ranking record — the backend field is nullable-array-of-nullable-string per GraphQL. */
-export interface RankingRecord {
+export interface RankingRecord extends TimestampedRecord {
+  owner?: string | null
   orderedMovieIds?: (string | null)[] | null
 }
 
 export type CategoryRatings = Partial<Record<SubratingKey, number | null | undefined>>
 
 /** A single review record: one user's rating of one movie. */
-export interface ReviewRecord extends CategoryRatings {
+export interface ReviewRecord extends TimestampedRecord, CategoryRatings {
+  owner?: string | null
   movieId: string
 }
 
-export interface GroupRankingEntry<T extends MovieLike = MovieLike> {
+export interface PairwiseRankingEntry<T extends MovieLike = MovieLike> {
   movie: T
-  averageRank: number
+  winRate: number
+  wins: number
+  losses: number
+  matchupCount: number
   reviewerCount: number
 }
 
 /**
- * Combines every user's ranked list into one consensus ranking.
+ * Consensus ranking via head-to-head comparisons, so members who've ranked different
+ * numbers of movies still contribute fairly.
  *
- * Rank position 1 is best. For each movie, we average its rank positions
- * across only the users who ranked it (unranked = excluded, not penalized).
- * Movies nobody has ranked are omitted entirely (there is nothing to average).
- * Ties break alphabetically by title.
+ * Each member's ranked list contributes only the head-to-head comparisons it actually
+ * contains: a user's #2 of 4 means "above the two movies below it", not the same
+ * absolute placement as another user's #2 of 10. Movies sort by win rate (wins /
+ * matchups), so a movie two people agree is great outranks one that squeaked a single
+ * narrow win.
  */
-export function computeGroupRanking<T extends MovieLike>(
+export function computePairwiseRanking<T extends MovieLike>(
   movies: T[],
   rankings: RankingRecord[],
-): GroupRankingEntry<T>[] {
-  const rankSums = new Map<string, number>()
-  const rankCounts = new Map<string, number>()
+): PairwiseRankingEntry<T>[] {
+  const movieIds = new Set(movies.map((movie) => movie.id))
+  const wins = new Map<string, number>()
+  const losses = new Map<string, number>()
+  const reviewersByMovie = new Map<string, Set<string>>()
 
-  for (const ranking of rankings) {
-    const orderedMovieIds = (ranking.orderedMovieIds ?? []).filter((id): id is string => Boolean(id))
-    orderedMovieIds.forEach((movieId, index) => {
-      const position = index + 1
-      rankSums.set(movieId, (rankSums.get(movieId) ?? 0) + position)
-      rankCounts.set(movieId, (rankCounts.get(movieId) ?? 0) + 1)
+  for (const ranking of latestByKey(rankings, (r) => r.owner)) {
+    const seen = new Set<string>()
+    const orderedMovieIds = (ranking.orderedMovieIds ?? []).filter((id): id is string => {
+      if (!id || !movieIds.has(id) || seen.has(id)) return false
+      seen.add(id)
+      return true
     })
+    const reviewer = ranking.owner ?? ranking.id ?? `ownerless-${orderedMovieIds.join('-')}`
+
+    for (const movieId of orderedMovieIds) {
+      if (!reviewersByMovie.has(movieId)) reviewersByMovie.set(movieId, new Set())
+      reviewersByMovie.get(movieId)!.add(reviewer)
+    }
+
+    for (let i = 0; i < orderedMovieIds.length; i++) {
+      const winner = orderedMovieIds[i]
+      for (let j = i + 1; j < orderedMovieIds.length; j++) {
+        const loser = orderedMovieIds[j]
+        wins.set(winner, (wins.get(winner) ?? 0) + 1)
+        losses.set(loser, (losses.get(loser) ?? 0) + 1)
+      }
+    }
   }
 
-  const entries: GroupRankingEntry<T>[] = []
-
+  const entries: PairwiseRankingEntry<T>[] = []
   for (const movie of movies) {
-    const count = rankCounts.get(movie.id) ?? 0
-    if (count === 0) continue
+    const movieWins = wins.get(movie.id) ?? 0
+    const movieLosses = losses.get(movie.id) ?? 0
+    const matchupCount = movieWins + movieLosses
+    const reviewerCount = reviewersByMovie.get(movie.id)?.size ?? 0
+    if (reviewerCount === 0) continue
 
     entries.push({
       movie,
-      averageRank: rankSums.get(movie.id)! / count,
-      reviewerCount: count,
+      wins: movieWins,
+      losses: movieLosses,
+      matchupCount,
+      reviewerCount,
+      winRate: matchupCount === 0 ? 0 : movieWins / matchupCount,
     })
   }
 
   entries.sort((a, b) => {
-    if (a.averageRank !== b.averageRank) return a.averageRank - b.averageRank
+    if (a.winRate !== b.winRate) return b.winRate - a.winRate
+    if (a.wins - a.losses !== b.wins - b.losses) return b.wins - b.losses - (a.wins - a.losses)
+    if (a.matchupCount !== b.matchupCount) return b.matchupCount - a.matchupCount
+    if (a.reviewerCount !== b.reviewerCount) return b.reviewerCount - a.reviewerCount
     return a.movie.title.localeCompare(b.movie.title)
   })
 
@@ -92,7 +125,7 @@ export function computeCategoryRanking<T extends MovieLike>(
   const sums = new Map<string, number>()
   const counts = new Map<string, number>()
 
-  for (const review of reviews) {
+  for (const review of latestReviewsByOwnerAndMovie(reviews)) {
     const value = review[key]
     if (typeof value === 'number') {
       sums.set(review.movieId, (sums.get(review.movieId) ?? 0) + value)
@@ -126,7 +159,7 @@ export function computeMovieCategoryAverages(
   reviews: ReviewRecord[],
   keys: readonly SubratingKey[],
 ): Record<SubratingKey, CategorySummary | null> {
-  const relevant = reviews.filter((r) => r.movieId === movieId)
+  const relevant = latestReviewsByOwnerAndMovie(reviews).filter((r) => r.movieId === movieId)
   const result = {} as Record<SubratingKey, CategorySummary | null>
 
   for (const key of keys) {
@@ -143,4 +176,8 @@ export function computeMovieCategoryAverages(
   }
 
   return result
+}
+
+function latestReviewsByOwnerAndMovie(reviews: ReviewRecord[]): ReviewRecord[] {
+  return latestByKey(reviews, (review) => (review.owner ? `${review.owner}:${review.movieId}` : null))
 }

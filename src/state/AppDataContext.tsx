@@ -1,8 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { fetchAuthSession } from 'aws-amplify/auth'
-import { client, type AppUserRecord, type MovieRecord, type RankingRecordFull, type ReviewRecordFull } from '../lib/dataClient'
+import {
+  client,
+  type AppUserRecord,
+  type MovieRecord,
+  type MovieWatchRecord,
+  type RankingRecordFull,
+  type ReviewRecordFull,
+  type WatchVoteRecord,
+} from '../lib/dataClient'
 import { createUpsertQueue } from '../lib/upsertQueue'
+import { latestByKey, latestByKeyMap } from '../lib/records'
 import { SUBRATING_KEYS, type Subratings } from '../types'
 
 interface ReviewInput {
@@ -23,8 +32,17 @@ interface AppDataContextValue {
   profilesByOwner: Map<string, AppUserRecord>
   allRankings: RankingRecordFull[]
   allReviews: ReviewRecordFull[]
+  allMovieWatches: MovieWatchRecord[]
+  watchedMovieIds: Set<string>
+  allWatchVotes: WatchVoteRecord[]
+  myVotesByMovieId: Map<string, WatchVoteRecord>
   myReviewsByMovieId: Map<string, ReviewRecordFull>
   setMyReview: (movieId: string, input: ReviewInput) => Promise<void>
+  setMyWatchVote: (movieId: string, voted: boolean) => Promise<void>
+  upsertMovieWatch: (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string }) => Promise<void>
+  deleteMovieWatch: (movieId: string) => Promise<void>
+  setVotingDate: (dateKey: string) => Promise<void>
+  clearVotingDate: () => Promise<void>
   createMovie: (input: { title: string; year: number; actor: string; posterUrl: string }) => Promise<void>
   createMember: (input: { name: string; password: string; isAdmin: boolean }) => Promise<void>
 }
@@ -45,6 +63,26 @@ function deriveUsername(loginId?: string): string {
   return loginId.split('@')[0]
 }
 
+function latestByOwner<T extends { owner?: string | null; updatedAt?: string | null; createdAt?: string | null; id?: string | null }>(records: T[]) {
+  return latestByKeyMap(records, (record) => record.owner)
+}
+
+function latestReviewsByOwnerAndMovie(reviews: ReviewRecordFull[]) {
+  return latestByKey(reviews, (review) => (review.owner ? `${review.owner}:${review.movieId}` : null))
+}
+
+function latestVotesByOwnerAndMovie(votes: WatchVoteRecord[]) {
+  return latestByKey(votes, (vote) => (vote.owner ? `${vote.owner}:${vote.movieId}` : null))
+}
+
+function latestWatchByMovie(watches: MovieWatchRecord[]) {
+  return [...latestByKeyMap(watches, (watch) => watch.movieId).values()]
+}
+
+function assertNoDataErrors(result: { errors?: { message?: string | null }[] | null }) {
+  if (result.errors?.length) throw new Error(result.errors.map((error) => error.message ?? 'Request failed').join('; '))
+}
+
 export function AppDataProvider({
   userId,
   loginId,
@@ -61,9 +99,19 @@ export function AppDataProvider({
   const [profiles, setProfiles] = useState<AppUserRecord[]>([])
   const [rankings, setRankings] = useState<RankingRecordFull[]>([])
   const [reviews, setReviews] = useState<ReviewRecordFull[]>([])
+  const [movieWatches, setMovieWatches] = useState<MovieWatchRecord[]>([])
+  const [watchVotes, setWatchVotes] = useState<WatchVoteRecord[]>([])
+  const [profilesSynced, setProfilesSynced] = useState(false)
+  const [rankingsSynced, setRankingsSynced] = useState(false)
+  const [reviewsSynced, setReviewsSynced] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
 
   const hasAttemptedProfileCreate = useRef(false)
+  const currentUserIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    currentUserIdRef.current = userId
+  }, [userId])
 
   // Signed-in reads satisfy `allow.owner()`/`allow.authenticated()`/`allow.groups()` under
   // the default 'userPool' auth mode; signed-out reads only satisfy `allow.guest()`, which
@@ -97,28 +145,78 @@ export function AppDataProvider({
   useEffect(() => {
     if (authLoading) return
     const sub = client.models.AppUser.observeQuery({ authMode: readAuthMode }).subscribe({
-      next: ({ items }) => setProfiles([...items]),
+      next: ({ items, isSynced }) => {
+        setProfiles([...items])
+        if (isSynced) setProfilesSynced(true)
+      },
       error: (err) => console.error('AppUser subscription error', err),
     })
-    return () => sub.unsubscribe()
+    return () => {
+      setProfilesSynced(false)
+      sub.unsubscribe()
+    }
   }, [readAuthMode, authLoading])
 
   useEffect(() => {
     if (authLoading) return
     const sub = client.models.Ranking.observeQuery({ authMode: readAuthMode }).subscribe({
-      next: ({ items }) => setRankings([...items]),
+      next: ({ items, isSynced }) => {
+        setRankings([...items])
+        if (isSynced) setRankingsSynced(true)
+      },
       error: (err) => console.error('Ranking subscription error', err),
+    })
+    return () => {
+      setRankingsSynced(false)
+      sub.unsubscribe()
+    }
+  }, [readAuthMode, authLoading])
+
+  useEffect(() => {
+    if (authLoading) return
+    const sub = client.models.Review.observeQuery({ authMode: readAuthMode }).subscribe({
+      next: ({ items, isSynced }) => {
+        setReviews([...items])
+        if (isSynced) setReviewsSynced(true)
+      },
+      error: (err) => console.error('Review subscription error', err),
+    })
+    return () => {
+      setReviewsSynced(false)
+      sub.unsubscribe()
+    }
+  }, [readAuthMode, authLoading])
+
+  useEffect(() => {
+    if (authLoading) return
+    const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+    if (!model) {
+      setMovieWatches([])
+      return
+    }
+    const sub = model.observeQuery({ authMode: readAuthMode }).subscribe({
+      next: ({ items }) => setMovieWatches([...items]),
+      error: (err) => console.error('MovieWatch subscription error', err),
     })
     return () => sub.unsubscribe()
   }, [readAuthMode, authLoading])
 
   useEffect(() => {
     if (authLoading) return
-    const sub = client.models.Review.observeQuery({ authMode: readAuthMode }).subscribe({
-      next: ({ items }) => setReviews([...items]),
-      error: (err) => console.error('Review subscription error', err),
+    const model = (client.models as { WatchVote?: typeof client.models.WatchVote }).WatchVote
+    if (!model) {
+      setWatchVotes([])
+      return
+    }
+    const sub = model.observeQuery({ authMode: readAuthMode }).subscribe({
+      next: ({ items }) => {
+        setWatchVotes([...items])
+      },
+      error: (err) => console.error('WatchVote subscription error', err),
     })
-    return () => sub.unsubscribe()
+    return () => {
+      sub.unsubscribe()
+    }
   }, [readAuthMode, authLoading])
 
   useEffect(() => {
@@ -134,25 +232,37 @@ export function AppDataProvider({
       .catch(() => setIsAdmin(false))
   }, [userId])
 
-  const myProfile = useMemo(() => (userId ? (profiles.find((p) => p.owner === userId) ?? null) : null), [profiles, userId])
+  const rawProfilesByOwner = useMemo(() => latestByOwner(profiles), [profiles])
+
+  const profilesByOwner = useMemo(() => {
+    const map = new Map(rawProfilesByOwner)
+    for (const [ownerId, profile] of map) {
+      if (profile.active === false) map.delete(ownerId)
+    }
+    return map
+  }, [rawProfilesByOwner])
+
+  const activeOwnerIds = useMemo(() => new Set(profilesByOwner.keys()), [profilesByOwner])
+
+  const myProfile = useMemo(() => (userId ? (rawProfilesByOwner.get(userId) ?? null) : null), [rawProfilesByOwner, userId])
 
   // Auto-provision a profile the first time a newly admin-created user signs in.
   useEffect(() => {
     if (!userId || myProfile || hasAttemptedProfileCreate.current) return
-    if (profiles.length === 0 && moviesLoading) return // wait for first sync to avoid a duplicate race
+    if (!profilesSynced) return
     hasAttemptedProfileCreate.current = true
-    client.models.AppUser.create({ displayName: deriveDefaultName(loginId), username: deriveUsername(loginId) }).catch((err) => {
+    client.models.AppUser.create({ id: userId, displayName: deriveDefaultName(loginId), username: deriveUsername(loginId) }).catch((err) => {
       console.error('Failed to auto-provision profile', err)
       hasAttemptedProfileCreate.current = false
     })
-  }, [userId, myProfile, profiles.length, moviesLoading, loginId])
+  }, [userId, myProfile, profilesSynced, loginId])
 
   useEffect(() => {
     hasAttemptedProfileCreate.current = false
   }, [userId])
 
   const myRankingRecord = useMemo(
-    () => (userId ? (rankings.find((r) => r.owner === userId) ?? null) : null),
+    () => (userId ? (latestByOwner(rankings).get(userId) ?? null) : null),
     [rankings, userId],
   )
   const rankedIds = useMemo(
@@ -163,19 +273,42 @@ export function AppDataProvider({
   const myReviewsByMovieId = useMemo(() => {
     const map = new Map<string, ReviewRecordFull>()
     if (!userId) return map
-    for (const review of reviews) {
+    for (const review of latestReviewsByOwnerAndMovie(reviews)) {
       if (review.owner === userId) map.set(review.movieId, review)
     }
     return map
   }, [reviews, userId])
 
-  const profilesByOwner = useMemo(() => {
-    const map = new Map<string, AppUserRecord>()
-    for (const profile of profiles) {
-      if (profile.owner) map.set(profile.owner, profile)
+  const activeRankings = useMemo(
+    () => [...latestByOwner(rankings).values()].filter((ranking) => ranking.owner && activeOwnerIds.has(ranking.owner)),
+    [rankings, activeOwnerIds],
+  )
+  const activeReviews = useMemo(
+    () => latestReviewsByOwnerAndMovie(reviews).filter((review) => review.owner && activeOwnerIds.has(review.owner)),
+    [reviews, activeOwnerIds],
+  )
+  const activeWatchVotes = useMemo(
+    () => latestVotesByOwnerAndMovie(watchVotes).filter((vote) => vote.owner && activeOwnerIds.has(vote.owner)),
+    [watchVotes, activeOwnerIds],
+  )
+  const allMovieWatches = useMemo(() => latestWatchByMovie(movieWatches), [movieWatches])
+  const watchedMovieIds = useMemo(
+    () =>
+      new Set(
+        allMovieWatches
+          .filter((watch): watch is typeof watch & { movieId: string } => Boolean(watch.movieId) && (watch.status === 'watched' || Boolean(watch.watchedAt)))
+          .map((watch) => watch.movieId),
+      ),
+    [allMovieWatches],
+  )
+  const myVotesByMovieId = useMemo(() => {
+    const map = new Map<string, WatchVoteRecord>()
+    if (!userId) return map
+    for (const vote of activeWatchVotes) {
+      if (vote.owner === userId) map.set(vote.movieId, vote)
     }
     return map
-  }, [profiles])
+  }, [activeWatchVotes, userId])
 
   const renameMe = useCallback(
     async (name: string) => {
@@ -199,7 +332,7 @@ export function AppDataProvider({
     createUpsertQueue<string[]>({
       getExistingId: () => rankingIdRef.current,
       create: async (orderedMovieIds) => {
-        const { data } = await client.models.Ranking.create({ orderedMovieIds })
+        const { data } = await client.models.Ranking.create({ id: currentUserIdRef.current ?? undefined, orderedMovieIds })
         return data!.id
       },
       update: async (id, orderedMovieIds) => {
@@ -209,8 +342,9 @@ export function AppDataProvider({
   )
 
   const setMyRanking = useCallback((movieIds: string[]) => {
+    if (!userId || !rankingsSynced) return
     rankingQueueRef.current(movieIds).catch((err) => console.error('Failed to save ranking', err))
-  }, [])
+  }, [rankingsSynced, userId])
 
   // --- Review upsert: one queue per movie, created lazily, keyed by movieId. ---
   const reviewQueuesRef = useRef(new Map<string, ReturnType<typeof createUpsertQueue<ReviewInput>>>())
@@ -234,7 +368,8 @@ export function AppDataProvider({
         getExistingId: () => reviewIdsRef.current.get(movieId) ?? null,
         create: async (input) => {
           const categoryFields = Object.fromEntries(SUBRATING_KEYS.map((key) => [key, input.subratings[key] ?? null]))
-          const { data } = await client.models.Review.create({ movieId, text: input.text, ...categoryFields })
+          const userScopedId = currentUserIdRef.current ? `${currentUserIdRef.current}_${movieId}` : undefined
+          const { data } = await client.models.Review.create({ id: userScopedId, movieId, text: input.text, ...categoryFields })
           reviewIdsRef.current.set(movieId, data!.id)
           return data!.id
         },
@@ -249,11 +384,110 @@ export function AppDataProvider({
   }
 
   const setMyReview = useCallback((movieId: string, input: ReviewInput) => {
+    if (!userId || !reviewsSynced) return Promise.reject(new Error('Review data is still syncing. Try again in a moment.'))
     return getReviewQueue(movieId)(input).catch((err) => {
       console.error('Failed to save review', err)
       throw err
     })
-  }, [])
+  }, [reviewsSynced, userId])
+
+  const setMyWatchVote = useCallback(
+    async (movieId: string, voted: boolean) => {
+      if (!userId) return
+      const model = (client.models as { WatchVote?: typeof client.models.WatchVote }).WatchVote
+      if (!model) throw new Error('Watch votes are not deployed yet.')
+      const existing = myVotesByMovieId.get(movieId)
+      const id = existing?.id ?? `${userId}_${movieId}`
+      if (voted) {
+        await Promise.all(
+          [...myVotesByMovieId.values()]
+            .filter((vote) => vote.movieId !== movieId)
+            .map(async (vote) => assertNoDataErrors(await model.delete({ id: vote.id }))),
+        )
+        if (existing) {
+          assertNoDataErrors(await model.update({ id, vote: 'interested' }))
+          return
+        }
+        try {
+          const result = await model.create({ id, movieId, vote: 'interested' })
+          assertNoDataErrors(result)
+        } catch {
+          assertNoDataErrors(await model.update({ id, vote: 'interested' }))
+        }
+      } else {
+        await Promise.all([...myVotesByMovieId.values()].map(async (vote) => assertNoDataErrors(await model.delete({ id: vote.id }))))
+      }
+    },
+    [myVotesByMovieId, userId],
+  )
+
+  const upsertMovieWatch = useCallback(
+    async (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string }) => {
+      if (!isAdmin) throw new Error('Only admins can schedule movie nights.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const voteModel = (client.models as { WatchVote?: typeof client.models.WatchVote }).WatchVote
+      const existing = allMovieWatches.find((watch) => watch.movieId === input.movieId)
+      const payload = {
+        id: input.movieId,
+        movieId: input.movieId,
+        status: input.status,
+        scheduledFor: input.scheduledFor || null,
+        watchedAt: input.watchedAt || null,
+      }
+      assertNoDataErrors(existing ? await model.update({ ...payload, id: existing.id }) : await model.create(payload))
+      // Being scheduled OR marked watched both take a movie out of the votable pool,
+      // so either transition should clear its votes — not just the watched one, or a
+      // vote for a movie that just got scheduled sits orphaned: uncounted, invisible,
+      // with no UI left to change it, until someone else happens to switch their vote.
+      if (voteModel) {
+        await Promise.all(
+          activeWatchVotes.filter((vote) => vote.movieId === input.movieId).map(async (vote) => assertNoDataErrors(await voteModel.delete({ id: vote.id }))),
+        )
+      }
+      // A movie just claimed this date, so the "vote for a date with no movie yet"
+      // placeholder that was reserving it (if any) has done its job — clear it rather
+      // than leaving a phantom placeholder sitting on the same date as a real movie.
+      const placeholder = allMovieWatches.find((watch) => watch.status === 'voting' && watch.scheduledFor === input.scheduledFor)
+      if (placeholder) assertNoDataErrors(await model.delete({ id: placeholder.id }))
+    },
+    [activeWatchVotes, allMovieWatches, isAdmin],
+  )
+
+  const deleteMovieWatch = useCallback(
+    async (movieId: string) => {
+      if (!isAdmin) throw new Error('Only admins can change movie night scheduling.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const existing = allMovieWatches.find((watch) => watch.movieId === movieId)
+      if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
+    },
+    [allMovieWatches, isAdmin],
+  )
+
+  // Reserves a date for "movie night" before a movie has been picked — voting keeps
+  // working exactly the same, it just targets this date instead of the auto-picked
+  // next Sunday. Only one such placeholder exists at a time (id is fixed), so setting
+  // a new date just moves it rather than leaving old ones behind.
+  const setVotingDate = useCallback(
+    async (dateKey: string) => {
+      if (!isAdmin) throw new Error('Only admins can change the vote date.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const existing = allMovieWatches.find((watch) => watch.status === 'voting')
+      const payload = { id: 'pending-vote', status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null }
+      assertNoDataErrors(existing ? await model.update({ ...payload, id: existing.id }) : await model.create(payload))
+    },
+    [allMovieWatches, isAdmin],
+  )
+
+  const clearVotingDate = useCallback(async () => {
+    if (!isAdmin) throw new Error('Only admins can change the vote date.')
+    const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+    if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+    const existing = allMovieWatches.find((watch) => watch.status === 'voting')
+    if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
+  }, [allMovieWatches, isAdmin])
 
   const createMovie = useCallback(
     async (input: { title: string; year: number; actor: string; posterUrl: string }) => {
@@ -282,10 +516,19 @@ export function AppDataProvider({
       rankedIds,
       setMyRanking,
       profilesByOwner,
-      allRankings: rankings,
-      allReviews: reviews,
+      allRankings: activeRankings,
+      allReviews: activeReviews,
+      allMovieWatches,
+      watchedMovieIds,
+      allWatchVotes: activeWatchVotes,
+      myVotesByMovieId,
       myReviewsByMovieId,
       setMyReview,
+      setMyWatchVote,
+      upsertMovieWatch,
+      deleteMovieWatch,
+      setVotingDate,
+      clearVotingDate,
       createMovie,
       createMember,
     }),
@@ -300,10 +543,19 @@ export function AppDataProvider({
       rankedIds,
       setMyRanking,
       profilesByOwner,
-      rankings,
-      reviews,
+      activeRankings,
+      activeReviews,
+      allMovieWatches,
+      watchedMovieIds,
+      activeWatchVotes,
+      myVotesByMovieId,
       myReviewsByMovieId,
       setMyReview,
+      setMyWatchVote,
+      upsertMovieWatch,
+      deleteMovieWatch,
+      setVotingDate,
+      clearVotingDate,
       createMovie,
       createMember,
     ],

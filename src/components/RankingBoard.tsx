@@ -63,7 +63,7 @@ const autoScrollConfig: AutoScrollOptions = {
 }
 
 export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
-  const { movies, moviesLoading, rankedIds, setMyRanking } = useAppData()
+  const { movies, moviesLoading, rankedIds, setMyRanking, watchedMovieIds } = useAppData()
   const [sortKey, setSortKey] = useState<SortKey>('overall')
   const [activeId, setActiveId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -71,8 +71,15 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   const moviesById = useMemo(() => new Map(movies.map((m) => [m.id, m])), [movies])
   const unrankedIds = useMemo(() => {
     const rankedSet = new Set(rankedIds)
-    return movies.filter((m) => !rankedSet.has(m.id)).map((m) => m.id)
-  }, [movies, rankedIds])
+    return movies
+      .filter((m) => !rankedSet.has(m.id))
+      .sort((a, b) => {
+        const watchedDelta = Number(watchedMovieIds.has(b.id)) - Number(watchedMovieIds.has(a.id))
+        if (watchedDelta !== 0) return watchedDelta
+        return a.sortOrder - b.sortOrder
+      })
+      .map((m) => m.id)
+  }, [movies, rankedIds, watchedMovieIds])
 
   const [localRanked, setLocalRanked] = useState<string[]>(rankedIds)
   const [localUnranked, setLocalUnranked] = useState<string[]>(unrankedIds)

@@ -11,10 +11,15 @@ interface MovieDetailModalProps {
   onOpenProfile: (ownerId: string) => void
 }
 
-/** Read-only global view of a movie: average category ratings, and everyone's written review. */
-export function MovieDetailModal({ movieId, onClose, onOpenProfile }: MovieDetailModalProps) {
-  const { movies, allReviews, profilesByOwner } = useAppData()
+/**
+ * The actual movie breakdown — poster, meta, average ratings, everyone's written
+ * review. Split out from MovieDetailModal so it can also render inline (the Upcoming
+ * page's day-details panel) without dragging a modal backdrop along with it.
+ */
+export function MovieDetailContent({ movieId, onOpenProfile }: { movieId: string; onOpenProfile: (ownerId: string) => void }) {
+  const { movies, allReviews, profilesByOwner, allMovieWatches } = useAppData()
   const movie = movies.find((m) => m.id === movieId)
+  const watch = allMovieWatches.find((record) => record.movieId === movieId)
 
   const reviewsForMovie = useMemo(
     () =>
@@ -27,42 +32,56 @@ export function MovieDetailModal({ movieId, onClose, onOpenProfile }: MovieDetai
   if (!movie) return null
 
   return (
+    <>
+      <div className="modal-header">
+        <PosterImage movie={movie} size="lg" />
+        <div>
+          <h2>{movie.title}</h2>
+          {watch?.watchedAt && <p className="modal-meta">Watched {formatDate(watch.watchedAt)}</p>}
+          {!watch?.watchedAt && watch?.scheduledFor && <p className="modal-meta">Scheduled {formatDate(watch.scheduledFor)}</p>}
+          <p className="modal-meta">
+            {movie.year} · {movie.actor}
+          </p>
+        </div>
+      </div>
+
+      <section className="modal-section">
+        <h3>Average Ratings</h3>
+        <GlobalAverages movieId={movieId} />
+      </section>
+
+      {reviewsForMovie.length > 0 && (
+        <section className="modal-section">
+          <h3>Reviews</h3>
+          <div className="all-reviews-list">
+            {reviewsForMovie.map(({ review, name }) => (
+              <div key={review.id} className="profile-review-card">
+                <button type="button" className="profile-review-name" onClick={() => onOpenProfile(review.owner ?? '')}>
+                  {name}
+                </button>
+                <p className="profile-review-text">{review.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  )
+}
+
+/** Read-only global view of a movie: average category ratings, and everyone's written review. */
+export function MovieDetailModal({ movieId, onClose, onOpenProfile }: MovieDetailModalProps) {
+  const { movies } = useAppData()
+  const movie = movies.find((m) => m.id === movieId)
+  if (!movie) return null
+
+  return (
     <ModalBackdrop onClose={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
           Close
         </button>
-
-        <div className="modal-header">
-          <PosterImage movie={movie} size="lg" />
-          <div>
-            <h2>{movie.title}</h2>
-            <p className="modal-meta">
-              {movie.year} · {movie.actor}
-            </p>
-          </div>
-        </div>
-
-        <section className="modal-section">
-          <h3>Average Ratings</h3>
-          <GlobalAverages movieId={movieId} />
-        </section>
-
-        {reviewsForMovie.length > 0 && (
-          <section className="modal-section">
-            <h3>Reviews</h3>
-            <div className="all-reviews-list">
-              {reviewsForMovie.map(({ review, name }) => (
-                <div key={review.id} className="profile-review-card">
-                  <button type="button" className="profile-review-name" onClick={() => onOpenProfile(review.owner ?? '')}>
-                    {name}
-                  </button>
-                  <p className="profile-review-text">{review.text}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        <MovieDetailContent movieId={movieId} onOpenProfile={onOpenProfile} />
       </div>
     </ModalBackdrop>
   )
@@ -109,4 +128,10 @@ export function ScoreRow({
       </span>
     </div>
   )
+}
+
+function formatDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
