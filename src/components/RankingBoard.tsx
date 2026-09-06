@@ -23,7 +23,7 @@ import { computeCategoryRanking } from '../lib/ranking'
 import { DraggableMovieRow } from './DraggableMovieRow'
 import { MovieCard } from './MovieCard'
 import { SortControl } from './SortControl'
-import { SUBRATING_LABELS, type SortKey } from '../types'
+import { SORT_OPTIONS, SUBRATING_LABELS, type SortKey } from '../types'
 
 interface RankingBoardProps {
   onOpenMovie: (movieId: string) => void
@@ -302,7 +302,7 @@ export function RankingBoard({ onOpenMovie }: RankingBoardProps) {
   return (
     <div className="ranking-board" ref={boardRef}>
       <div className="ranking-board-controls">
-        <SortControl value={sortKey} onChange={setSortKey} />
+        <SortControl value={sortKey} onChange={setSortKey} options={SORT_OPTIONS} />
         {sortKey === 'overall' && movies.length > 0 && (
           <input
             type="search"

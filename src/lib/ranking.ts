@@ -20,6 +20,60 @@ export interface ReviewRecord extends TimestampedRecord, CategoryRatings {
   movieId: string
 }
 
+export interface GroupRankingEntry<T extends MovieLike = MovieLike> {
+  movie: T
+  averageRank: number
+  reviewerCount: number
+}
+
+/**
+ * Combines every user's ranked list into one consensus ranking by averaging raw rank
+ * positions. Simple and easy to explain, but two people's #2 don't mean the same thing
+ * if one ranked 4 movies and the other ranked 20 — see computePairwiseRanking for the
+ * alternative that corrects for that. Kept as a selectable option since it's still a
+ * legitimate, more familiar way to read the same data.
+ *
+ * Rank position 1 is best. For each movie, we average its rank positions across only
+ * the users who ranked it (unranked = excluded, not penalized). Movies nobody has
+ * ranked are omitted entirely (there is nothing to average). Ties break alphabetically.
+ */
+export function computeGroupRanking<T extends MovieLike>(movies: T[], rankings: RankingRecord[]): GroupRankingEntry<T>[] {
+  const rankSums = new Map<string, number>()
+  const rankCounts = new Map<string, number>()
+
+  for (const ranking of latestByKey(rankings, (r) => r.owner)) {
+    const orderedMovieIds = (ranking.orderedMovieIds ?? []).filter((id): id is string => Boolean(id))
+    const seenInThisRanking = new Set<string>()
+    orderedMovieIds.forEach((movieId, index) => {
+      if (seenInThisRanking.has(movieId)) return
+      seenInThisRanking.add(movieId)
+      const position = index + 1
+      rankSums.set(movieId, (rankSums.get(movieId) ?? 0) + position)
+      rankCounts.set(movieId, (rankCounts.get(movieId) ?? 0) + 1)
+    })
+  }
+
+  const entries: GroupRankingEntry<T>[] = []
+
+  for (const movie of movies) {
+    const count = rankCounts.get(movie.id) ?? 0
+    if (count === 0) continue
+
+    entries.push({
+      movie,
+      averageRank: rankSums.get(movie.id)! / count,
+      reviewerCount: count,
+    })
+  }
+
+  entries.sort((a, b) => {
+    if (a.averageRank !== b.averageRank) return a.averageRank - b.averageRank
+    return a.movie.title.localeCompare(b.movie.title)
+  })
+
+  return entries
+}
+
 export interface PairwiseRankingEntry<T extends MovieLike = MovieLike> {
   movie: T
   winRate: number

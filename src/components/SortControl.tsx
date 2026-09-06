@@ -1,17 +1,15 @@
-import { SORT_OPTIONS, type SortKey } from '../types'
-
-interface SortControlProps {
-  value: SortKey
-  onChange: (key: SortKey) => void
-  options?: readonly { key: SortKey; label: string }[]
+interface SortControlProps<K extends string> {
+  value: K
+  onChange: (key: K) => void
+  options: readonly { key: K; label: string }[]
 }
 
-export function SortControl({ value, onChange, options = SORT_OPTIONS }: SortControlProps) {
+export function SortControl<K extends string>({ value, onChange, options }: SortControlProps<K>) {
   return (
     <div className="sort-control">
       <label>
         <span>Sort by</span>
-        <select value={value} onChange={(e) => onChange(e.target.value as SortKey)}>
+        <select value={value} onChange={(e) => onChange(e.target.value as K)}>
           {options.map((opt) => (
             <option key={opt.key} value={opt.key}>
               {opt.label}

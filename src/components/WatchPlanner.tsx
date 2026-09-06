@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
 import { useAppData } from '../state/AppDataContext'
 import type { MovieRecord, MovieWatchRecord, WatchVoteRecord } from '../lib/dataClient'
 import { latestByKeyMap } from '../lib/records'
 import { MovieCard } from './MovieCard'
-import { MovieDetailContent } from './MovieDetailModal'
 import { PosterImage } from './PosterImage'
 
 interface WatchPlannerProps {
   onOpenMovie: (movieId: string) => void
-  onOpenProfile: (ownerId: string) => void
 }
 
 type WatchStatus = 'scheduled' | 'watched'
@@ -313,13 +323,56 @@ interface CalendarGridProps {
   monthDays: ReturnType<typeof buildMonthDays>
   movieById: Map<string, MovieRecord>
   selectedDateKey: string
+  isAdmin: boolean
+  dragError: string
   onPrevMonth: () => void
   onNextMonth: () => void
   onToday: () => void
   onDayClick: (dateKey: string) => void
+  onDropMovie: (sourceDateKey: string, targetDateKey: string) => void
 }
 
-function CalendarGrid({ monthCursor, monthDays, movieById, selectedDateKey, onPrevMonth, onNextMonth, onToday, onDayClick }: CalendarGridProps) {
+// Same activation rules as the personal ranking board's drag-and-drop (see
+// RankingBoard for the full rationale): mouse starts on a small move, touch needs a
+// brief hold first so an ordinary tap or scroll swipe is never mistaken for a drag.
+// No keyboard sensor here — moving a night by keyboard/screen reader already works
+// fully through the ordinary click-a-day-then-edit-the-form path; drag is purely an
+// added mouse/touch convenience on top of that, not a replacement for it.
+function useCalendarDragSensors() {
+  return useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
+}
+
+function CalendarGrid({
+  monthCursor,
+  monthDays,
+  movieById,
+  selectedDateKey,
+  isAdmin,
+  dragError,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
+  onDayClick,
+  onDropMovie,
+}: CalendarGridProps) {
+  const [activeDateKey, setActiveDateKey] = useState<string | null>(null)
+  const sensors = useCalendarDragSensors()
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    setActiveDateKey(null)
+    if (!over) return
+    const sourceDateKey = String(active.id)
+    const targetDateKey = String(over.id)
+    if (sourceDateKey !== targetDateKey) onDropMovie(sourceDateKey, targetDateKey)
+  }
+
+  const activeWatch = activeDateKey ? (monthDays.find((day) => day.key === activeDateKey)?.watches[0] ?? null) : null
+  const activeMovie = activeWatch?.movieId ? movieById.get(activeWatch.movieId) : null
+
   return (
     <section className="sunday-calendar">
       <div className="section-header-row">
@@ -337,58 +390,108 @@ function CalendarGrid({ monthCursor, monthDays, movieById, selectedDateKey, onPr
         </div>
       </div>
 
+      {isAdmin && <p className="sunday-muted">Drag a scheduled or watched night onto another day to move it there.</p>}
+      {dragError && <p className="admin-form-error">{dragError}</p>}
+
       <div className="sunday-calendar-scroll">
-        <div className="month-calendar">
-          {WEEKDAY_LABELS.map((day) => (
-            <span className={`month-calendar-weekday${day === 'Sun' ? ' sunday' : ''}`} key={day}>
-              {day}
-            </span>
-          ))}
-          {monthDays.map((day) => {
-            const watch = day.watches[0] ?? null
-            const movie = watch?.movieId ? movieById.get(watch.movieId) : null
-            const isVotingPlaceholder = watch?.status === 'voting'
-            const overdue = watch ? isOverdue(watch) : false
-            const status = watch ? statusForWatch(watch) : 'open'
-            const dayStatus = isVotingPlaceholder ? 'voting' : status
-            return (
-              <button
-                type="button"
-                className={[
-                  'month-calendar-day',
-                  day.inMonth ? '' : 'outside-month',
-                  day.isSunday ? 'sunday' : '',
-                  day.isToday ? 'today' : '',
-                  selectedDateKey === day.key ? 'selected' : '',
-                  dayStatus,
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={(event) => setActiveDateKey(String(event.active.id))}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveDateKey(null)}
+        >
+          <div className="month-calendar">
+            {WEEKDAY_LABELS.map((day) => (
+              <span className={`month-calendar-weekday${day === 'Sun' ? ' sunday' : ''}`} key={day}>
+                {day}
+              </span>
+            ))}
+            {monthDays.map((day) => (
+              <CalendarDayCell
                 key={day.key}
+                day={day}
+                movieById={movieById}
+                isSelected={selectedDateKey === day.key}
+                isAdmin={isAdmin}
+                isDragging={activeDateKey === day.key}
                 onClick={() => onDayClick(day.key)}
-              >
-                <span className="month-calendar-date">{day.dayNumber}</span>
-                {movie && (
-                  <span className="month-calendar-event">
-                    <span className="month-calendar-event-title">{movie.title}</span>
-                    <span className="month-calendar-event-meta">
-                      {status === 'watched' ? `Watched ${formatShortDate(watchStart(watch))}` : overdue ? 'Overdue' : 'Scheduled'}
-                    </span>
-                  </span>
-                )}
-                {isVotingPlaceholder && (
-                  <span className="month-calendar-event">
-                    <span className="month-calendar-event-title">Vote night</span>
-                  </span>
-                )}
-                {!watch && day.isSunday && <span className="month-calendar-open">Open</span>}
-                {day.watches.length > 1 && <span className="month-calendar-count">+{day.watches.length - 1}</span>}
-              </button>
-            )
-          })}
-        </div>
+              />
+            ))}
+          </div>
+          <DragOverlay>
+            {activeMovie && (
+              <div className="month-calendar-event">
+                <span className="month-calendar-event-title">{activeMovie.title}</span>
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
       </div>
     </section>
+  )
+}
+
+interface CalendarDayCellProps {
+  day: ReturnType<typeof buildMonthDays>[number]
+  movieById: Map<string, MovieRecord>
+  isSelected: boolean
+  isAdmin: boolean
+  isDragging: boolean
+  onClick: () => void
+}
+
+function CalendarDayCell({ day, movieById, isSelected, isAdmin, isDragging, onClick }: CalendarDayCellProps) {
+  const watch = day.watches[0] ?? null
+  const movie = watch?.movieId ? movieById.get(watch.movieId) : null
+  const isVotingPlaceholder = watch?.status === 'voting'
+  const overdue = watch ? isOverdue(watch) : false
+  const status = watch ? statusForWatch(watch) : 'open'
+  const dayStatus = isVotingPlaceholder ? 'voting' : status
+  const canDrag = isAdmin && Boolean(movie)
+
+  const { attributes, listeners, setNodeRef: setDragRef } = useDraggable({ id: day.key, disabled: !canDrag })
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: day.key })
+
+  return (
+    <button
+      ref={(node) => {
+        setDragRef(node)
+        setDropRef(node)
+      }}
+      type="button"
+      className={[
+        'month-calendar-day',
+        day.inMonth ? '' : 'outside-month',
+        day.isSunday ? 'sunday' : '',
+        day.isToday ? 'today' : '',
+        isSelected ? 'selected' : '',
+        isOver ? 'drag-over' : '',
+        canDrag ? 'draggable' : '',
+        dayStatus,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={isDragging ? { opacity: 0.35 } : undefined}
+      onClick={onClick}
+      {...(canDrag ? attributes : {})}
+      {...(canDrag ? listeners : {})}
+    >
+      <span className="month-calendar-date">{day.dayNumber}</span>
+      {movie && (
+        <span className="month-calendar-event">
+          <span className="month-calendar-event-title">{movie.title}</span>
+          <span className="month-calendar-event-meta">{overdue ? 'Overdue' : status === 'watched' ? 'Watched' : 'Scheduled'}</span>
+        </span>
+      )}
+      {isVotingPlaceholder && (
+        <span className="month-calendar-event">
+          <span className="month-calendar-event-title">Vote night</span>
+        </span>
+      )}
+      {!watch && day.isSunday && <span className="month-calendar-open">Open</span>}
+      {day.watches.length > 1 && <span className="month-calendar-count">+{day.watches.length - 1}</span>}
+    </button>
   )
 }
 
@@ -416,7 +519,8 @@ function ScheduleForm({ isNew, movies, watchesByMovieId, movieId, date, status, 
         onSubmit()
       }}
     >
-      <h3>{isNew ? 'Schedule a movie' : 'Move or edit this night'}</h3>
+      <h3>{isNew ? 'Add a movie night' : 'Replace or move this night'}</h3>
+      {!isNew && <p className="sunday-muted">Picking a different movie here swaps it in and drops the current one. To add another night alongside this one, use Add a movie night below.</p>}
       <label>
         Movie
         <select value={movieId} onChange={(e) => onMovieChange(e.target.value)} required>
@@ -456,7 +560,7 @@ function ScheduleForm({ isNew, movies, watchesByMovieId, movieId, date, status, 
 
 // --- Main component -----------------------------------------------------------
 
-export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) {
+export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   const {
     movies,
     allMovieWatches,
@@ -475,6 +579,7 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
 
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(parseLocalDate(todayKey())))
   const [manualSelectedDateKey, setManualSelectedDateKey] = useState<string | null>(null)
+  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null)
   const [formMovieId, setFormMovieId] = useState('')
   const [formDate, setFormDate] = useState('')
   const [formStatus, setFormStatus] = useState<WatchStatus>('scheduled')
@@ -486,6 +591,12 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
   const [voteDateDraft, setVoteDateDraft] = useState('')
   const [voteDatePending, setVoteDatePending] = useState(false)
   const [voteDateError, setVoteDateError] = useState('')
+  const [dragError, setDragError] = useState('')
+  const [addMovieId, setAddMovieId] = useState('')
+  const [addDate, setAddDate] = useState('')
+  const [addStatus, setAddStatus] = useState<WatchStatus>('scheduled')
+  const [addError, setAddError] = useState('')
+  const [addPending, setAddPending] = useState(false)
 
   const movieById = useMemo(() => new Map(movies.map((movie) => [movie.id, movie])), [movies])
   // A "voting" placeholder (a date reserved for a vote, no movie chosen yet) has no
@@ -589,23 +700,37 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
   // computed fresh each render rather than copied into state, so it keeps tracking
   // "up next" live (e.g. if a vote resolves) right up until that first click.
   const selectedDateKey = manualSelectedDateKey ?? upcomingDateKey
-  const selectedWatch = watchesByDate.get(selectedDateKey)?.[0] ?? null
+  // Two or more movies can land on the same date (most commonly from a backfill that
+  // can only estimate a date from when a ranking was submitted, not when each movie
+  // was actually watched) — all of them need to stay reachable, not just the first.
+  const dayWatches = watchesByDate.get(selectedDateKey) ?? []
+  const selectedWatch = (selectedMovieId ? dayWatches.find((w) => w.movieId === selectedMovieId) : null) ?? dayWatches[0] ?? null
   const selectedMovie = selectedWatch?.movieId ? movieById.get(selectedWatch.movieId) : null
   const isVoteDay = !selectedMovie && selectedDateKey === voteTargetDateKey
 
-  // Keep the admin edit form in step with whichever day is selected — re-seeded only
-  // when the selection itself changes, not on every incidental data refresh, so an
-  // admin's in-progress edit isn't clobbered by an unrelated vote coming in.
+  // Keep the admin edit form in step with whichever day/movie is selected —
+  // re-seeded only when that selection changes, not on every incidental data
+  // refresh, so an admin's in-progress edit isn't clobbered by an unrelated vote
+  // coming in.
   useEffect(() => {
     setFormMovieId(selectedWatch?.movieId ?? '')
     setFormDate(selectedDateKey)
     setFormStatus(selectedWatch ? statusForWatch(selectedWatch) : 'scheduled')
     setFormError('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDateKey, selectedMovieId])
+
+  // The "add another movie" form defaults its date to whichever day is selected, but
+  // stays independent of it otherwise — an admin can still add a movie to a
+  // completely different date without navigating there first.
+  useEffect(() => {
+    setAddDate(selectedDateKey)
+    setAddError('')
   }, [selectedDateKey])
 
   function selectDate(dateKey: string) {
     setManualSelectedDateKey(dateKey)
+    setSelectedMovieId(null)
     setMonthCursor(startOfMonth(parseLocalDate(dateKey)))
   }
 
@@ -628,6 +753,31 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
       setFormError(err instanceof Error ? err.message : 'Could not save this movie night.')
     } finally {
       setRowPending(false)
+    }
+  }
+
+  // Always available regardless of what's currently selected — unlike submitForm
+  // (which can replace whichever movie is already on the selected day), this only
+  // ever touches the record for the chosen movie, so it's the one safe way to add a
+  // second movie to a day that already has one.
+  async function submitAddWatch() {
+    if (!addMovieId || !addDate) return
+    setAddError('')
+    setAddPending(true)
+    try {
+      await upsertMovieWatch({
+        movieId: addMovieId,
+        scheduledFor: addDate,
+        watchedAt: addStatus === 'watched' ? addDate : undefined,
+        status: addStatus,
+      })
+      selectDate(addDate)
+      setSelectedMovieId(addMovieId)
+      setAddMovieId('')
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Could not add this movie night.')
+    } finally {
+      setAddPending(false)
     }
   }
 
@@ -684,6 +834,29 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
       setVoteDateError(err instanceof Error ? err.message : 'Could not change the vote date.')
     } finally {
       setVoteDatePending(false)
+    }
+  }
+
+  async function handleDropMovie(sourceDateKey: string, targetDateKey: string) {
+    const sourceWatch = watchesByDate.get(sourceDateKey)?.find((watch) => watch.movieId)
+    if (!sourceWatch?.movieId) return
+    setDragError('')
+    const occupant = watchesByDate.get(targetDateKey)?.find((watch) => watch.movieId && watch.movieId !== sourceWatch.movieId)
+    if (occupant) {
+      const title = movieById.get(occupant.movieId as string)?.title ?? 'Another movie'
+      setDragError(`${title} is already on that day. Move or remove it first.`)
+      return
+    }
+    try {
+      await upsertMovieWatch({
+        movieId: sourceWatch.movieId,
+        scheduledFor: targetDateKey,
+        watchedAt: isWatched(sourceWatch) ? targetDateKey : undefined,
+        status: statusForWatch(sourceWatch),
+      })
+      selectDate(targetDateKey)
+    } catch (err) {
+      setDragError(err instanceof Error ? err.message : 'Could not move this movie night.')
     }
   }
 
@@ -760,10 +933,13 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
         monthDays={monthDays}
         movieById={movieById}
         selectedDateKey={selectedDateKey}
+        isAdmin={isAdmin}
+        dragError={dragError}
         onPrevMonth={() => setMonthCursor((value) => addMonths(value, -1))}
         onNextMonth={() => setMonthCursor((value) => addMonths(value, 1))}
         onToday={() => setMonthCursor(startOfMonth(parseLocalDate(todayKey())))}
         onDayClick={selectDate}
+        onDropMovie={(source, target) => void handleDropMovie(source, target)}
       />
 
       <section className="sunday-day-details">
@@ -771,9 +947,46 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
           <h2>{formatDisplayDate(selectedDateKey)}</h2>
         </div>
 
-        {selectedMovie ? (
-          <MovieDetailContent movieId={selectedMovie.id} onOpenProfile={onOpenProfile} />
-        ) : isVoteDay ? (
+        {dayWatches.length > 0 && (
+          <div className="ranked-list">
+            {dayWatches.map((watch) => {
+              const movie = watch.movieId ? movieById.get(watch.movieId) : null
+              if (!movie) return null
+              const active = dayWatches.length > 1 && watch.movieId === selectedWatch?.movieId
+              return (
+                <MovieCard
+                  key={watch.id}
+                  movie={movie}
+                  subtitle={isWatched(watch) ? 'Watched' : isOverdue(watch) ? 'Overdue' : 'Scheduled'}
+                  onClick={() => {
+                    setSelectedMovieId(watch.movieId ?? null)
+                    onOpenMovie(watch.movieId as string)
+                  }}
+                  trailing={
+                    <span className="sunday-row-actions">
+                      {active && <span className="sunday-pill">Viewing</span>}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="unrank-button"
+                          disabled={rowPending}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void removeWatch(watch)
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  }
+                />
+              )
+            })}
+          </div>
+        )}
+
+        {selectedMovie ? null : isVoteDay ? (
           <>
             {totalMembers > 0 && <p className="sunday-muted">{currentVotes.length} of {totalMembers} members have voted</p>}
             <VoteList
@@ -833,6 +1046,23 @@ export function WatchPlanner({ onOpenMovie, onOpenProfile }: WatchPlannerProps) 
                   {isWatched(selectedWatch) ? 'Undo' : 'Unschedule'}
                 </button>
               </div>
+            )}
+
+            {selectedWatch?.movieId && (
+              <ScheduleForm
+                isNew
+                movies={movies}
+                watchesByMovieId={watchesByMovieId}
+                movieId={addMovieId}
+                date={addDate}
+                status={addStatus}
+                pending={addPending}
+                error={addError}
+                onMovieChange={setAddMovieId}
+                onDateChange={setAddDate}
+                onStatusChange={setAddStatus}
+                onSubmit={() => void submitAddWatch()}
+              />
             )}
 
             <ScheduleForm

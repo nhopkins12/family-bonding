@@ -130,8 +130,15 @@ export function ScoreRow({
   )
 }
 
+/**
+ * Parses just the date portion as local calendar components (not a time-zoned instant)
+ * — these are always plain "watched/scheduled on this day" facts with no real time of
+ * day attached, so showing one is misleading, and parsing "2026-07-23" as a UTC instant
+ * (the default for a bare date string) shifts it a day earlier in negative-UTC zones.
+ */
 function formatDate(value: string) {
-  const date = new Date(value)
+  const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  const date = dateOnly ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])) : new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  return date.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })
 }
