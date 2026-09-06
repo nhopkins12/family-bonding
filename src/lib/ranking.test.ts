@@ -1,12 +1,113 @@
 import { describe, expect, it } from 'vitest'
 import type { MovieLike, RankingRecord, ReviewRecord } from './ranking'
-import { computeCategoryRanking, computeMovieCategoryAverages, computePairwiseRanking } from './ranking'
+import { computeCategoryRanking, computeGroupRanking, computeMovieCategoryAverages, computePairwiseRanking } from './ranking'
 
 function movie(id: string, title: string): MovieLike {
   return { id, title }
 }
 
 const movies: MovieLike[] = [movie('a', 'Alpha'), movie('b', 'Bravo'), movie('c', 'Charlie'), movie('d', 'Delta')]
+
+describe('computeGroupRanking', () => {
+  it('averages rank positions across users who ranked a movie', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a', 'b', 'c'] },
+      { owner: 'u2', orderedMovieIds: ['b', 'a', 'c'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+
+    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
+    expect(byId.a.averageRank).toBe(1.5)
+    expect(byId.b.averageRank).toBe(1.5)
+    expect(byId.c.averageRank).toBe(3)
+  })
+
+  it('excludes movies a user did not rank from that user contribution', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a', 'b'] },
+      { owner: 'u2', orderedMovieIds: ['b'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
+
+    expect(byId.a.averageRank).toBe(1)
+    expect(byId.a.reviewerCount).toBe(1)
+    expect(byId.b.averageRank).toBe(1.5)
+    expect(byId.b.reviewerCount).toBe(2)
+  })
+
+  it('omits movies nobody has ranked', () => {
+    const rankings: RankingRecord[] = [{ owner: 'u1', orderedMovieIds: ['a'] }]
+    const result = computeGroupRanking(movies, rankings)
+    expect(result.map((e) => e.movie.id)).toEqual(['a'])
+  })
+
+  it('does not require every user to have ranked every movie', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a'] },
+      { owner: 'u2', orderedMovieIds: ['a', 'b', 'c'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+    expect(result.map((e) => e.movie.id).sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('handles null/missing ranking data gracefully', () => {
+    const rankings: RankingRecord[] = [{ owner: 'u1', orderedMovieIds: null }, { owner: 'u2', orderedMovieIds: ['a', null, 'b'] }, { owner: 'u3' }]
+    const result = computeGroupRanking(movies, rankings)
+    expect(result.map((e) => e.movie.id)).toEqual(['a', 'b'])
+  })
+
+  it('sorts by lowest average rank first', () => {
+    const rankings: RankingRecord[] = [{ owner: 'u1', orderedMovieIds: ['c', 'a', 'b'] }]
+    const result = computeGroupRanking(movies, rankings)
+    expect(result.map((e) => e.movie.id)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('breaks ties alphabetically by title', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['b', 'a'] },
+      { owner: 'u2', orderedMovieIds: ['a', 'b'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+    expect(result[0].movie.id).toBe('a')
+    expect(result[1].movie.id).toBe('b')
+  })
+
+  it('reports the number of users included in the average', () => {
+    const rankings: RankingRecord[] = [
+      { owner: 'u1', orderedMovieIds: ['a'] },
+      { owner: 'u2', orderedMovieIds: ['a'] },
+      { owner: 'u3', orderedMovieIds: ['b'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
+    expect(byId.a.reviewerCount).toBe(2)
+    expect(byId.b.reviewerCount).toBe(1)
+  })
+
+  it('uses only the latest ranking record per owner', () => {
+    const rankings: RankingRecord[] = [
+      { id: 'old', owner: 'u1', updatedAt: '2026-01-01T00:00:00.000Z', orderedMovieIds: ['a', 'b'] },
+      { id: 'new', owner: 'u1', updatedAt: '2026-01-02T00:00:00.000Z', orderedMovieIds: ['b', 'a'] },
+      { id: 'u2', owner: 'u2', updatedAt: '2026-01-01T00:00:00.000Z', orderedMovieIds: ['b'] },
+    ]
+    const result = computeGroupRanking(movies, rankings)
+    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
+
+    expect(byId.a.averageRank).toBe(2)
+    expect(byId.a.reviewerCount).toBe(1)
+    expect(byId.b.averageRank).toBe(1)
+    expect(byId.b.reviewerCount).toBe(2)
+  })
+
+  it('counts a movie only once per ranking record if duplicate ids are present', () => {
+    const result = computeGroupRanking(movies, [{ owner: 'u1', orderedMovieIds: ['a', 'a', 'b'] }])
+    const byId = Object.fromEntries(result.map((e) => [e.movie.id, e]))
+
+    expect(byId.a.averageRank).toBe(1)
+    expect(byId.a.reviewerCount).toBe(1)
+  })
+})
 
 describe('computePairwiseRanking', () => {
   it('omits movies nobody has ranked', () => {

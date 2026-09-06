@@ -105,9 +105,7 @@ function AppShell({
 
             <main className="app-main">
               {page.tab === 'global' && <GroupRanking onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />}
-              {page.tab === 'next' && (
-                <WatchPlanner onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} onOpenProfile={openMember} />
-              )}
+              {page.tab === 'next' && <WatchPlanner onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />}
               {page.tab === 'members' && <MembersList onOpenMember={openMember} />}
             </main>
           </>

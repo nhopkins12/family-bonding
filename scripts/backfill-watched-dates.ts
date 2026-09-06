@@ -1,11 +1,29 @@
 /**
- * Marks movies that already have ranking/review activity as watched.
+ * Marks movies currently ranked by at least one member as watched. Reviews/scores
+ * alone never qualify a movie as watched — someone can open the review UI and leave a
+ * stray score without ever having watched the movie with the group; being in an
+ * actual ranked list is a much stronger, harder-to-fake signal of that.
+ *
+ * The watched DATE is a separate question. A Ranking row is one array field per
+ * person that gets updated in place every time they add or reorder a movie, so its
+ * createdAt is only "when this person first ranked anything" — every movie they've
+ * ever ranked shares that one timestamp, however many weeks apart they actually
+ * added each one. That collapses everyone's whole backlog onto a single date. A
+ * Review is its own row per movie, so its createdAt tracks a specific movie far more
+ * precisely — most people rate a movie close to when they watched it. So: gate on
+ * being ranked (unchanged), but for the date itself, prefer the earliest review with
+ * real content for that movie, falling back to the earliest ranking timestamp only
+ * when no review exists yet.
  *
  * Dry run:
  *   ADMIN_NAME="Nick" ADMIN_PASSWORD="..." npm run backfill-watched-dates
  *
  * Apply:
  *   ADMIN_NAME="Nick" ADMIN_PASSWORD="..." npm run backfill-watched-dates -- --apply
+ *
+ * Exclude specific titles (e.g. someone ranked a movie by mistake) — comma-separated,
+ * matched exactly:
+ *   npm run backfill-watched-dates -- --skip "Movie One,Movie Two"
  *
  * PowerShell apply alternative:
  *   $env:BACKFILL_APPLY="true"
@@ -38,7 +56,6 @@ type ModelClient<T extends { id: string }> = {
 type Candidate = {
   movieId: string
   timestamp: number
-  source: string
 }
 
 async function listAll<T extends { id: string }>(model: ModelClient<T>) {
@@ -81,22 +98,50 @@ function titleFor(movieById: Map<string, Movie>, movieId: string) {
   return movieById.get(movieId)?.title ?? movieId
 }
 
-function collectCandidates(rankings: Ranking[], reviews: Review[]) {
+function collectCandidates(rankings: Ranking[]) {
   const earliest = new Map<string, Candidate>()
 
-  function add(movieId: string | null | undefined, timestamp: number | null, source: string) {
+  function add(movieId: string | null | undefined, timestamp: number | null) {
     if (!movieId || timestamp === null) return
     const existing = earliest.get(movieId)
-    if (!existing || timestamp < existing.timestamp) earliest.set(movieId, { movieId, timestamp, source })
+    if (!existing || timestamp < existing.timestamp) earliest.set(movieId, { movieId, timestamp })
   }
 
   for (const ranking of rankings) {
     const timestamp = timestampFrom(ranking)
-    for (const movieId of ranking.orderedMovieIds ?? []) add(movieId, timestamp, 'ranking')
+    for (const movieId of ranking.orderedMovieIds ?? []) add(movieId, timestamp)
   }
 
-  for (const review of reviews) add(review.movieId, timestampFrom(review), 'review')
+  return earliest
+}
 
+function hasReviewContent(review: Review) {
+  return Boolean(
+    review.text ||
+      review.story != null ||
+      review.bond != null ||
+      review.villain != null ||
+      review.action != null ||
+      review.themeSong != null ||
+      review.gadgets != null ||
+      review.rewatchability != null ||
+      review.datedness != null ||
+      review.misogyny != null ||
+      review.culturalInsensitivity != null ||
+      review.campiness != null,
+  )
+}
+
+/** Earliest non-empty review per movie — a much more specific "when watched" signal than a ranking row (see file header). */
+function collectEarliestReviewByMovie(reviews: Review[]) {
+  const earliest = new Map<string, number>()
+  for (const review of reviews) {
+    if (!hasReviewContent(review)) continue
+    const timestamp = timestampFrom(review)
+    if (timestamp === null) continue
+    const existing = earliest.get(review.movieId)
+    if (existing === undefined || timestamp < existing) earliest.set(review.movieId, timestamp)
+  }
   return earliest
 }
 
@@ -108,7 +153,7 @@ function groupWatchesByMovie(watches: MovieWatch[]) {
 
 function assertRequiredModels() {
   const models = client.models as Record<string, unknown>
-  const missing = ['Movie', 'Ranking', 'Review', 'MovieWatch', 'WatchVote'].filter((modelName) => !models[modelName])
+  const missing = ['Movie', 'Ranking', 'MovieWatch'].filter((modelName) => !models[modelName])
   if (missing.length === 0) return
 
   throw new Error(
@@ -121,8 +166,16 @@ function assertRequiredModels() {
   )
 }
 
+function parseSkipTitles() {
+  const flagIndex = process.argv.indexOf('--skip')
+  const raw = flagIndex !== -1 ? process.argv[flagIndex + 1] : process.env.BACKFILL_SKIP
+  if (!raw) return new Set<string>()
+  return new Set(raw.split(',').map((title) => title.trim()).filter(Boolean))
+}
+
 async function main() {
   const apply = process.argv.includes('--apply') || process.env.BACKFILL_APPLY === 'true'
+  const skipTitles = parseSkipTitles()
   const name = process.env.ADMIN_NAME
   const password = process.env.ADMIN_PASSWORD
 
@@ -143,22 +196,34 @@ async function main() {
   ])
 
   const movieById = new Map(movies.map((movie) => [movie.id, movie]))
-  const watchedCandidates = collectCandidates(rankings, reviews)
+  const watchedCandidates = collectCandidates(rankings)
+  const earliestReviewByMovie = collectEarliestReviewByMovie(reviews)
   const watchesByMovie = groupWatchesByMovie(watches)
   let created = 0
   let updated = 0
   let unchanged = 0
+  let skipped = 0
 
   console.log(apply ? 'Applying watched-date backfill.' : 'Dry run only. Re-run with -- --apply to write these watched dates.')
-  console.log(`Found ${watchedCandidates.size} movie(s) with ranking or review activity.`)
+  console.log(`Found ${watchedCandidates.size} movie(s) currently ranked by at least one member.`)
+  if (skipTitles.size > 0) console.log(`Excluding via --skip: ${[...skipTitles].join(', ')}`)
 
   for (const candidate of [...watchedCandidates.values()].sort((a, b) => a.timestamp - b.timestamp)) {
-    const dateKey = dateKeyFromTimestamp(candidate.timestamp)
+    const label = titleFor(movieById, candidate.movieId)
+
+    if (skipTitles.has(label)) {
+      skipped += 1
+      console.log(`  skipping ${label} (excluded via --skip)`)
+      continue
+    }
+
+    const reviewTimestamp = earliestReviewByMovie.get(candidate.movieId)
+    const targetDate = dateKeyFromTimestamp(reviewTimestamp ?? candidate.timestamp)
+    const dateSource = reviewTimestamp !== undefined ? 'earliest review' : 'earliest ranking'
     const existingRows = watchesByMovie.get(candidate.movieId) ?? []
     const existing = existingRows[0]
     const existingWatchedDate = dateKeyFromStoredDate(existing?.watchedAt)
     const existingScheduledDate = dateKeyFromStoredDate(existing?.scheduledFor)
-    const targetDate = [dateKey, existingWatchedDate].filter(Boolean).sort()[0] ?? dateKey
     const needsCreate = !existing
     const needsUpdate =
       Boolean(existing) &&
@@ -172,12 +237,11 @@ async function main() {
       continue
     }
 
-    const label = titleFor(movieById, candidate.movieId)
     if (existingRows.length > 1) console.warn(`  warning: ${label} has ${existingRows.length} MovieWatch rows; cleanup-backend-data should be run separately.`)
 
     if (needsCreate) {
       created += 1
-      console.log(`  ${apply ? 'create' : 'would create'} watched ${label} -> ${targetDate} from earliest ${candidate.source}`)
+      console.log(`  ${apply ? 'create' : 'would create'} watched ${label} -> ${targetDate} from ${dateSource}`)
       if (apply) {
         const result = await client.models.MovieWatch.create({
           id: candidate.movieId,
@@ -192,7 +256,7 @@ async function main() {
     }
 
     updated += 1
-    console.log(`  ${apply ? 'update' : 'would update'} watched ${label} -> ${targetDate} from earliest ${candidate.source}`)
+    console.log(`  ${apply ? 'update' : 'would update'} watched ${label} -> ${targetDate} from ${dateSource}`)
     if (apply) {
       const result = await client.models.MovieWatch.update({
         id: existing.id,
@@ -205,7 +269,7 @@ async function main() {
     }
   }
 
-  console.log(`Summary: ${created} create, ${updated} update, ${unchanged} unchanged.`)
+  console.log(`Summary: ${created} create, ${updated} update, ${unchanged} unchanged, ${skipped} skipped.`)
 }
 
 main().catch((error) => {
