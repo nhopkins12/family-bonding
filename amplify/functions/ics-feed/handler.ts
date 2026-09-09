@@ -2,7 +2,7 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb'
 import type { LambdaFunctionURLHandler } from 'aws-lambda'
-import { buildIcsCalendar, type IcsMovie, type IcsMovieWatch } from './ics'
+import { buildIcsCalendar, type IcsMovie, type IcsMovieWatch, type IcsWatchVote } from './ics'
 
 const secretsClient = new SecretsManagerClient({})
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
@@ -55,12 +55,13 @@ export const handler: LambdaFunctionURLHandler = async (event) => {
     return { statusCode: 404, body: 'Not found' }
   }
 
-  const [watches, movies] = await Promise.all([
+  const [watches, movies, votes] = await Promise.all([
     scanAll<IcsMovieWatch>(process.env.MOVIE_WATCH_TABLE_NAME!),
     scanAll<IcsMovie>(process.env.MOVIE_TABLE_NAME!),
+    scanAll<IcsWatchVote>(process.env.WATCH_VOTE_TABLE_NAME!),
   ])
   const movieById = new Map(movies.map((movie) => [movie.id, movie]))
-  const calendar = buildIcsCalendar(watches, movieById)
+  const calendar = buildIcsCalendar(watches, movieById, votes)
 
   return {
     statusCode: 200,

@@ -88,10 +88,13 @@ icsFeedLambda.addEnvironment('ICS_FEED_SECRET_ARN', icsFeedSecret.secretArn)
 
 const movieTable = backend.data.resources.tables['Movie']
 const movieWatchTable = backend.data.resources.tables['MovieWatch']
+const watchVoteTable = backend.data.resources.tables['WatchVote']
 movieTable.grantReadData(icsFeedLambda)
 movieWatchTable.grantReadData(icsFeedLambda)
+watchVoteTable.grantReadData(icsFeedLambda)
 icsFeedLambda.addEnvironment('MOVIE_TABLE_NAME', movieTable.tableName)
 icsFeedLambda.addEnvironment('MOVIE_WATCH_TABLE_NAME', movieWatchTable.tableName)
+icsFeedLambda.addEnvironment('WATCH_VOTE_TABLE_NAME', watchVoteTable.tableName)
 
 const icsFeedUrl = icsFeedLambda.addFunctionUrl({ authType: FunctionUrlAuthType.NONE })
 backend.addOutput({
