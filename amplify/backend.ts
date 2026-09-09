@@ -1,15 +1,18 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { Stack } from 'aws-cdk-lib'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import type { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda'
+import { FunctionUrlAuthType, type Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda'
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { createMember } from './functions/create-member/resource'
+import { icsFeed } from './functions/ics-feed/resource'
 
 const backend = defineBackend({
   auth,
   data,
   createMember,
+  icsFeed,
 })
 
 // Enforce "admin-created users only": Cognito rejects self-registration entirely.
@@ -65,4 +68,34 @@ new Policy(Stack.of(backend.data), 'GuestReadAccessPolicy', {
       resources: [`${graphqlApi.arn}/types/Query/*`, `${graphqlApi.arn}/types/Subscription/*`],
     }),
   ],
+})
+
+// --- Subscribable ICS calendar feed: unguessable, unauthenticated, read-only -----
+// A Lambda Function URL rather than a GraphQL query — calendar apps re-fetch a
+// subscription URL with a plain unauthenticated GET on their own schedule, which
+// AppSync has no way to serve. Gated by a CDK-generated secret path token instead of
+// real sign-in, since a subscribing calendar app can't do interactive auth either.
+const icsFeedLambda = backend.icsFeed.resources.lambda as LambdaFunction
+
+// Scoped into icsFeed's own stack — this secret has exactly one consumer, so unlike
+// the GuestReadAccessPolicy above there's no cross-stack dependency to reason about.
+const icsFeedSecret = new secretsmanager.Secret(Stack.of(icsFeedLambda), 'IcsFeedToken', {
+  description: 'Unguessable path token for the read-only ICS calendar subscription feed.',
+  generateSecretString: { passwordLength: 40, excludePunctuation: true }, // URL-path-safe, no encoding needed
+})
+icsFeedSecret.grantRead(icsFeedLambda)
+icsFeedLambda.addEnvironment('ICS_FEED_SECRET_ARN', icsFeedSecret.secretArn)
+
+const movieTable = backend.data.resources.tables['Movie']
+const movieWatchTable = backend.data.resources.tables['MovieWatch']
+movieTable.grantReadData(icsFeedLambda)
+movieWatchTable.grantReadData(icsFeedLambda)
+icsFeedLambda.addEnvironment('MOVIE_TABLE_NAME', movieTable.tableName)
+icsFeedLambda.addEnvironment('MOVIE_WATCH_TABLE_NAME', movieWatchTable.tableName)
+
+const icsFeedUrl = icsFeedLambda.addFunctionUrl({ authType: FunctionUrlAuthType.NONE })
+backend.addOutput({
+  custom: {
+    icsFeedUrl: icsFeedUrl.url,
+  },
 })

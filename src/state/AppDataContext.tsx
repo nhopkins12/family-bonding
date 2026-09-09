@@ -39,10 +39,12 @@ interface AppDataContextValue {
   myReviewsByMovieId: Map<string, ReviewRecordFull>
   setMyReview: (movieId: string, input: ReviewInput) => Promise<void>
   setMyWatchVote: (movieId: string, voted: boolean) => Promise<void>
-  upsertMovieWatch: (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string }) => Promise<void>
+  upsertMovieWatch: (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string; notes?: string }) => Promise<void>
   deleteMovieWatch: (movieId: string) => Promise<void>
-  setVotingDate: (dateKey: string) => Promise<void>
+  setVotingDate: (dateKey: string, notes?: string) => Promise<void>
   clearVotingDate: () => Promise<void>
+  setSkippedDate: (dateKey: string, notes?: string) => Promise<void>
+  clearSkippedDate: (dateKey: string) => Promise<void>
   createMovie: (input: { title: string; year: number; actor: string; posterUrl: string }) => Promise<void>
   createMember: (input: { name: string; password: string; isAdmin: boolean }) => Promise<void>
 }
@@ -81,6 +83,40 @@ function latestWatchByMovie(watches: MovieWatchRecord[]) {
 
 function assertNoDataErrors(result: { errors?: { message?: string | null }[] | null }) {
   if (result.errors?.length) throw new Error(result.errors.map((error) => error.message ?? 'Request failed').join('; '))
+}
+
+type UpsertModel = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  create: (input: any) => Promise<{ errors?: { message?: string | null }[] | null }>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  update: (input: any) => Promise<{ errors?: { message?: string | null }[] | null }>
+}
+
+/**
+ * Every MovieWatch row here uses a deterministic id (movieId, 'pending-vote', or
+ * skip-<dateKey>) instead of a random one, specifically so re-touching the same
+ * logical record updates it in place rather than duplicating it. That means the
+ * create-vs-update choice has to be right, but the live `allMovieWatches` list this
+ * decision is normally guessed from is a subscription snapshot that can be a beat
+ * behind the real table — guess wrong (e.g. right after another edit's write hasn't
+ * echoed back yet) and DynamoDB's own existence condition on create/update rejects
+ * the request outright ("The conditional request failed"). Trying the guessed
+ * operation first and silently falling back to the other one on that specific
+ * failure makes the call self-correcting instead of trusting a snapshot that might
+ * already be stale.
+ */
+async function upsertById(model: UpsertModel, payload: Record<string, unknown>, guessExists: boolean) {
+  const [primary, fallback] = guessExists ? [model.update, model.create] : [model.create, model.update]
+  const result = await primary(payload)
+  if (!result.errors?.length) return result
+  return fallback(payload)
+}
+
+// Deterministic per-date id (unlike the voting placeholder's fixed singleton id) so
+// re-skipping the same date updates the same row instead of creating duplicates, and
+// several different dates can each carry their own skip marker at once.
+function skipRecordId(dateKey: string) {
+  return `skip-${dateKey}`
 }
 
 export function AppDataProvider({
@@ -422,7 +458,7 @@ export function AppDataProvider({
   )
 
   const upsertMovieWatch = useCallback(
-    async (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string }) => {
+    async (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string; notes?: string }) => {
       if (!isAdmin) throw new Error('Only admins can schedule movie nights.')
       const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
       if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
@@ -434,8 +470,9 @@ export function AppDataProvider({
         status: input.status,
         scheduledFor: input.scheduledFor || null,
         watchedAt: input.watchedAt || null,
+        notes: input.notes || null,
       }
-      assertNoDataErrors(existing ? await model.update({ ...payload, id: existing.id }) : await model.create(payload))
+      assertNoDataErrors(await upsertById(model, payload, Boolean(existing)))
       // Being scheduled OR marked watched both take a movie out of the votable pool,
       // so either transition should clear its votes — not just the watched one, or a
       // vote for a movie that just got scheduled sits orphaned: uncounted, invisible,
@@ -450,6 +487,9 @@ export function AppDataProvider({
       // than leaving a phantom placeholder sitting on the same date as a real movie.
       const placeholder = allMovieWatches.find((watch) => watch.status === 'voting' && watch.scheduledFor === input.scheduledFor)
       if (placeholder) assertNoDataErrors(await model.delete({ id: placeholder.id }))
+      // Same idea for a "skip this day" marker — scheduling a real movie here overrides it.
+      const skip = allMovieWatches.find((watch) => watch.id === skipRecordId(input.scheduledFor ?? ''))
+      if (skip) assertNoDataErrors(await model.delete({ id: skip.id }))
     },
     [activeWatchVotes, allMovieWatches, isAdmin],
   )
@@ -470,13 +510,16 @@ export function AppDataProvider({
   // next Sunday. Only one such placeholder exists at a time (id is fixed), so setting
   // a new date just moves it rather than leaving old ones behind.
   const setVotingDate = useCallback(
-    async (dateKey: string) => {
+    async (dateKey: string, notes?: string) => {
       if (!isAdmin) throw new Error('Only admins can change the vote date.')
       const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
       if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
       const existing = allMovieWatches.find((watch) => watch.status === 'voting')
-      const payload = { id: 'pending-vote', status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null }
-      assertNoDataErrors(existing ? await model.update({ ...payload, id: existing.id }) : await model.create(payload))
+      const payload = { id: 'pending-vote', status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null, notes: notes || null }
+      assertNoDataErrors(await upsertById(model, payload, Boolean(existing)))
+      // Opening this date up for voting overrides any earlier "skip this day" marker.
+      const skip = allMovieWatches.find((watch) => watch.id === skipRecordId(dateKey))
+      if (skip) assertNoDataErrors(await model.delete({ id: skip.id }))
     },
     [allMovieWatches, isAdmin],
   )
@@ -488,6 +531,39 @@ export function AppDataProvider({
     const existing = allMovieWatches.find((watch) => watch.status === 'voting')
     if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
   }, [allMovieWatches, isAdmin])
+
+  // Marks a date as deliberately skipped — no movie night that week, and the
+  // auto-picked "next open Sunday" (see nextOpenSunday in WatchPlanner) treats any
+  // date with a MovieWatch row as occupied, so this makes it step past the skipped
+  // date to the following one instead of re-suggesting it. Keyed by date (not a
+  // singleton like the voting placeholder) since more than one date can be skipped
+  // at once.
+  const setSkippedDate = useCallback(
+    async (dateKey: string, notes?: string) => {
+      if (!isAdmin) throw new Error('Only admins can change the schedule.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const id = skipRecordId(dateKey)
+      const existing = allMovieWatches.find((watch) => watch.id === id)
+      const payload = { id, status: 'skipped', scheduledFor: dateKey, movieId: null, watchedAt: null, notes: notes || null }
+      assertNoDataErrors(await upsertById(model, payload, Boolean(existing)))
+      // A vote reserved for this date no longer makes sense once it's skipped.
+      const placeholder = allMovieWatches.find((watch) => watch.status === 'voting' && watch.scheduledFor === dateKey)
+      if (placeholder) assertNoDataErrors(await model.delete({ id: placeholder.id }))
+    },
+    [allMovieWatches, isAdmin],
+  )
+
+  const clearSkippedDate = useCallback(
+    async (dateKey: string) => {
+      if (!isAdmin) throw new Error('Only admins can change the schedule.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const existing = allMovieWatches.find((watch) => watch.id === skipRecordId(dateKey))
+      if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
+    },
+    [allMovieWatches, isAdmin],
+  )
 
   const createMovie = useCallback(
     async (input: { title: string; year: number; actor: string; posterUrl: string }) => {
@@ -529,6 +605,8 @@ export function AppDataProvider({
       deleteMovieWatch,
       setVotingDate,
       clearVotingDate,
+      setSkippedDate,
+      clearSkippedDate,
       createMovie,
       createMember,
     }),
@@ -556,6 +634,8 @@ export function AppDataProvider({
       deleteMovieWatch,
       setVotingDate,
       clearVotingDate,
+      setSkippedDate,
+      clearSkippedDate,
       createMovie,
       createMember,
     ],

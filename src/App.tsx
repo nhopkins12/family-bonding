@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { isBackendConfigured } from './lib/amplifyConfig'
 import { useAuthState } from './lib/useAuthState'
 import { useTheme } from './lib/useTheme'
@@ -7,17 +7,24 @@ import type { ThemeOverride } from './lib/themePreference'
 import { AppDataProvider } from './state/AppDataContext'
 import { NotDeployedScreen } from './components/NotDeployedScreen'
 import { AccountMenu } from './components/AccountMenu'
-import { AdminPanel } from './components/AdminPanel'
-import { RankingBoard } from './components/RankingBoard'
 import { GroupRanking } from './components/GroupRanking'
-import { MembersList } from './components/MembersList'
-import { WatchPlanner } from './components/WatchPlanner'
-import { MemberRankingPage } from './components/MemberRankingPage'
-import { MovieDetailModal } from './components/MovieDetailModal'
-import { MyReviewModal } from './components/MyReviewModal'
-import { IndividualMovieReview } from './components/IndividualMovieReview'
 import { GunBarrelLoader } from './components/GunBarrelLoader'
 import { DotsSweepLoader } from './components/DotsSweepLoader'
+
+// Everything below is reached only by a deliberate click (a tab, a member, a
+// movie, "write a review", the admin panel) rather than needed for first
+// paint — splitting them into their own chunks keeps the initial bundle to
+// just what's actually on screen when the splash finishes. MyReviewModal in
+// particular pulls in the spellcheck/grammar-check libraries, which are
+// otherwise dead weight for anyone who never opens the review editor.
+const AdminPanel = lazy(() => import('./components/AdminPanel').then((m) => ({ default: m.AdminPanel })))
+const RankingBoard = lazy(() => import('./components/RankingBoard').then((m) => ({ default: m.RankingBoard })))
+const MembersList = lazy(() => import('./components/MembersList').then((m) => ({ default: m.MembersList })))
+const WatchPlanner = lazy(() => import('./components/WatchPlanner').then((m) => ({ default: m.WatchPlanner })))
+const MemberRankingPage = lazy(() => import('./components/MemberRankingPage').then((m) => ({ default: m.MemberRankingPage })))
+const MovieDetailModal = lazy(() => import('./components/MovieDetailModal').then((m) => ({ default: m.MovieDetailModal })))
+const MyReviewModal = lazy(() => import('./components/MyReviewModal').then((m) => ({ default: m.MyReviewModal })))
+const IndividualMovieReview = lazy(() => import('./components/IndividualMovieReview').then((m) => ({ default: m.IndividualMovieReview })))
 
 type Page =
   | { kind: 'browse'; tab: 'global' | 'next' | 'members' }
@@ -105,8 +112,16 @@ function AppShell({
 
             <main className="app-main">
               {page.tab === 'global' && <GroupRanking onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />}
-              {page.tab === 'next' && <WatchPlanner onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />}
-              {page.tab === 'members' && <MembersList onOpenMember={openMember} />}
+              {page.tab === 'next' && (
+                <Suspense fallback={null}>
+                  <WatchPlanner onOpenMovie={(movieId) => setOverlay({ kind: 'global-detail', movieId })} />
+                </Suspense>
+              )}
+              {page.tab === 'members' && (
+                <Suspense fallback={null}>
+                  <MembersList onOpenMember={openMember} />
+                </Suspense>
+              )}
             </main>
           </>
         )}
@@ -118,28 +133,44 @@ function AppShell({
             </button>
             <main className="app-main">
               <h2 className="page-title">My Rankings</h2>
-              <RankingBoard onOpenMovie={(movieId) => setOverlay({ kind: 'my-review', movieId })} />
+              <Suspense fallback={null}>
+                <RankingBoard onOpenMovie={(movieId) => setOverlay({ kind: 'my-review', movieId })} />
+              </Suspense>
             </main>
           </>
         )}
 
         {page.kind === 'member-ranking' && (
-          <MemberRankingPage
-            ownerId={page.ownerId}
-            onBack={openMembers}
-            onOpenMovie={(movieId) => setOverlay({ kind: 'member-review', ownerId: page.ownerId, movieId })}
-          />
+          <Suspense fallback={null}>
+            <MemberRankingPage
+              ownerId={page.ownerId}
+              onBack={openMembers}
+              onOpenMovie={(movieId) => setOverlay({ kind: 'member-review', ownerId: page.ownerId, movieId })}
+            />
+          </Suspense>
         )}
 
         {overlay?.kind === 'global-detail' && (
-          <MovieDetailModal movieId={overlay.movieId} onClose={() => setOverlay(null)} onOpenProfile={openMember} />
+          <Suspense fallback={null}>
+            <MovieDetailModal movieId={overlay.movieId} onClose={() => setOverlay(null)} onOpenProfile={openMember} />
+          </Suspense>
         )}
-        {overlay?.kind === 'my-review' && <MyReviewModal movieId={overlay.movieId} onClose={() => setOverlay(null)} />}
+        {overlay?.kind === 'my-review' && (
+          <Suspense fallback={null}>
+            <MyReviewModal movieId={overlay.movieId} onClose={() => setOverlay(null)} />
+          </Suspense>
+        )}
         {overlay?.kind === 'member-review' && (
-          <IndividualMovieReview ownerId={overlay.ownerId} movieId={overlay.movieId} onClose={() => setOverlay(null)} />
+          <Suspense fallback={null}>
+            <IndividualMovieReview ownerId={overlay.ownerId} movieId={overlay.movieId} onClose={() => setOverlay(null)} />
+          </Suspense>
         )}
 
-        {adminPanelOpen && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
+        {adminPanelOpen && (
+          <Suspense fallback={null}>
+            <AdminPanel onClose={() => setAdminPanelOpen(false)} />
+          </Suspense>
+        )}
       </div>
     </AppDataProvider>
   )
@@ -164,6 +195,16 @@ export default function App() {
   // animated component and letting the near-zero-duration CSS override race
   // through it — cleaner to just not show it at all.
   const [showIntro, setShowIntro] = useState(animationsEnabled)
+
+  // The static #preload-splash div (see index.html) covers the screen solid black
+  // from the very first paint, before this component (or even index.css) has
+  // loaded — its whole job is done the instant this first render actually commits,
+  // whether that's the real animated splash taking over (same black background, so
+  // the handoff is invisible) or, if animations are off, the real app appearing
+  // immediately in its place.
+  useEffect(() => {
+    document.getElementById('preload-splash')?.remove()
+  }, [])
 
   // <meta name="theme-color"> (in index.html) is pinned to a static dark value,
   // matching the splash's black background — but it never updated again after
