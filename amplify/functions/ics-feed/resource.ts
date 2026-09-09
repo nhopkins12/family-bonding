@@ -11,4 +11,11 @@ import { defineFunction } from '@aws-amplify/backend'
 export const icsFeed = defineFunction({
   name: 'ics-feed',
   entry: './handler.ts',
+  // Reads the Movie/MovieWatch tables directly (see amplify/backend.ts), which would
+  // otherwise put it in the shared function stack alongside createMember — and since
+  // data already depends on that function stack for createMember's resolver, icsFeed's
+  // grantReadData back onto the tables would close data -> function -> data into a
+  // circular nested-stack dependency. Grouping it into the data stack instead keeps
+  // that dependency one-directional.
+  resourceGroupName: 'data',
 })
