@@ -1,6 +1,10 @@
 @font-face {
   font-family: 'Futura Black';
-  src: url('./assets/fonts/futura-black.ttf') format('truetype');
+  /* Served from /public (a stable, unhashed path) rather than imported from
+     src/assets — index.html preloads this exact same path, which only works
+     for a URL that doesn't change on every build the way Vite's hashed
+     asset URLs do. */
+  src: url('/fonts/futura-black.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -670,14 +674,6 @@ h3 {
   padding: var(--space-4);
 }
 
-.sunday-day-admin {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-3);
-}
-
 /* No fixed min-width on the grid below: it shrinks to fit any viewport instead
    of forcing horizontal scroll. */
 .sunday-calendar {
@@ -815,9 +811,17 @@ h3 {
   background: color-mix(in srgb, var(--accent-soft) 8%, var(--bg-card));
 }
 
+/* Deliberately skipped — a plain gray wash, not the gold used for a real event, so
+   it reads at a glance as "nothing happening here on purpose" rather than "watch
+   night" or "vote open". */
+.month-calendar-day.skipped {
+  background: var(--bg-hover);
+}
+
 .month-calendar-day.scheduled .month-calendar-date,
 .month-calendar-day.watched .month-calendar-date,
-.month-calendar-day.voting .month-calendar-date {
+.month-calendar-day.voting .month-calendar-date,
+.month-calendar-day.skipped .month-calendar-date {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
@@ -837,6 +841,19 @@ h3 {
 .month-calendar-day.voting .month-calendar-date {
   background: var(--accent-soft);
   color: var(--accent-dim);
+}
+
+.month-calendar-day.skipped .month-calendar-date {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.month-calendar-day.skipped .month-calendar-event {
+  background: var(--border);
+}
+
+.month-calendar-day.skipped .month-calendar-event-title {
+  color: var(--text-muted);
 }
 
 .month-calendar-date {
@@ -897,30 +914,6 @@ h3 {
 
 .month-calendar-open {
   margin-top: auto;
-}
-
-.sunday-schedule-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-soft) 24%, var(--bg-card));
-  padding: var(--space-3);
-}
-
-.sunday-schedule-form h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--text-base);
-}
-
-.sunday-schedule-form label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
 /* Single unified toolbar — sort control, view toggle, and/or search live here as one
@@ -1976,6 +1969,12 @@ h3 {
   flex-direction: row !important;
   align-items: center;
   gap: var(--space-2) !important;
+}
+
+.admin-form-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .admin-form-submit {

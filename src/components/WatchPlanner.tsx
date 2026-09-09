@@ -14,8 +14,12 @@ import {
 import { useAppData } from '../state/AppDataContext'
 import type { MovieRecord, MovieWatchRecord, WatchVoteRecord } from '../lib/dataClient'
 import { latestByKeyMap } from '../lib/records'
+import { todayKey } from '../lib/watchDates'
+import { icsFeedUrl } from '../lib/amplifyConfig'
 import { MovieCard } from './MovieCard'
 import { PosterImage } from './PosterImage'
+import { EventEditorModal, type EventForm } from './EventEditorModal'
+import { SubscribeModal } from './SubscribeModal'
 
 interface WatchPlannerProps {
   onOpenMovie: (movieId: string) => void
@@ -24,11 +28,6 @@ interface WatchPlannerProps {
 type WatchStatus = 'scheduled' | 'watched'
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-// The family runs on Toronto time, so "today" always means today in Toronto,
-// regardless of which timezone a viewer's own device happens to be set to.
-const TIME_ZONE = 'America/Toronto'
-const torontoDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
 
 // --- Date helpers -----------------------------------------------------------
 
@@ -46,11 +45,6 @@ function localDateKey(value: Date | string | null | undefined) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${date.getFullYear()}-${month}-${day}`
-}
-
-/** Today's date key (YYYY-MM-DD) in Toronto time — en-CA formats as YYYY-MM-DD directly. */
-function todayKey() {
-  return torontoDateFormatter.format(new Date())
 }
 
 function addMonths(date: Date, months: number) {
@@ -156,6 +150,8 @@ function buildMonthDays(month: Date, watchesByDate: Map<string, MovieWatchRecord
 
   const totalDays = Math.round((gridEnd.getTime() - gridStart.getTime()) / 86_400_000) + 1
 
+  const today = todayKey()
+
   return Array.from({ length: totalDays }, (_, index) => {
     const date = new Date(gridStart)
     date.setDate(gridStart.getDate() + index)
@@ -166,35 +162,12 @@ function buildMonthDays(month: Date, watchesByDate: Map<string, MovieWatchRecord
       key,
       dayNumber: date.getDate(),
       inMonth: date.getMonth() === month.getMonth(),
-      isToday: key === todayKey(),
+      isToday: key === today,
+      isPast: key < today,
       isSunday: date.getDay() === 0,
       watches,
     }
   })
-}
-
-function downloadCalendar(filename: string, contents: string) {
-  const blob = new Blob([contents], { type: 'text/calendar;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-function toIcsTimestamp(value: string) {
-  return new Date(value).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
-}
-
-function toIcsAllDayDate(value: string) {
-  return localDateKey(value).replace(/-/g, '')
-}
-
-function nextDateKey(value: string) {
-  const date = parseLocalDate(value)
-  date.setDate(date.getDate() + 1)
-  return localDateKey(date)
 }
 
 // --- Presentational pieces ---------------------------------------------------
@@ -330,6 +303,7 @@ interface CalendarGridProps {
   onToday: () => void
   onDayClick: (dateKey: string) => void
   onDropMovie: (sourceDateKey: string, targetDateKey: string) => void
+  onAddEvent: () => void
 }
 
 // Same activation rules as the personal ranking board's drag-and-drop (see
@@ -357,6 +331,7 @@ function CalendarGrid({
   onToday,
   onDayClick,
   onDropMovie,
+  onAddEvent,
 }: CalendarGridProps) {
   const [activeDateKey, setActiveDateKey] = useState<string | null>(null)
   const sensors = useCalendarDragSensors()
@@ -378,6 +353,11 @@ function CalendarGrid({
       <div className="section-header-row">
         <h2>{formatMonth(monthCursor)}</h2>
         <div className="sunday-calendar-nav">
+          {isAdmin && (
+            <button type="button" className="secondary-button" onClick={onAddEvent}>
+              + Add event
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={onPrevMonth}>
             Previous
           </button>
@@ -445,9 +425,10 @@ function CalendarDayCell({ day, movieById, isSelected, isAdmin, isDragging, onCl
   const watch = day.watches[0] ?? null
   const movie = watch?.movieId ? movieById.get(watch.movieId) : null
   const isVotingPlaceholder = watch?.status === 'voting'
+  const isSkipped = watch?.status === 'skipped'
   const overdue = watch ? isOverdue(watch) : false
   const status = watch ? statusForWatch(watch) : 'open'
-  const dayStatus = isVotingPlaceholder ? 'voting' : status
+  const dayStatus = isVotingPlaceholder ? 'voting' : isSkipped ? 'skipped' : status
   const canDrag = isAdmin && Boolean(movie)
 
   const { attributes, listeners, setNodeRef: setDragRef } = useDraggable({ id: day.key, disabled: !canDrag })
@@ -489,72 +470,14 @@ function CalendarDayCell({ day, movieById, isSelected, isAdmin, isDragging, onCl
           <span className="month-calendar-event-title">Vote night</span>
         </span>
       )}
-      {!watch && day.isSunday && <span className="month-calendar-open">Open</span>}
+      {isSkipped && (
+        <span className="month-calendar-event">
+          <span className="month-calendar-event-title">No movie</span>
+        </span>
+      )}
+      {!watch && day.isSunday && !day.isPast && <span className="month-calendar-open">Open</span>}
       {day.watches.length > 1 && <span className="month-calendar-count">+{day.watches.length - 1}</span>}
     </button>
-  )
-}
-
-interface ScheduleFormProps {
-  isNew: boolean
-  movies: MovieRecord[]
-  watchesByMovieId: Map<string, MovieWatchRecord>
-  movieId: string
-  date: string
-  status: WatchStatus
-  pending: boolean
-  error: string
-  onMovieChange: (movieId: string) => void
-  onDateChange: (date: string) => void
-  onStatusChange: (status: WatchStatus) => void
-  onSubmit: () => void
-}
-
-function ScheduleForm({ isNew, movies, watchesByMovieId, movieId, date, status, pending, error, onMovieChange, onDateChange, onStatusChange, onSubmit }: ScheduleFormProps) {
-  return (
-    <form
-      className="sunday-schedule-form"
-      onSubmit={(e) => {
-        e.preventDefault()
-        onSubmit()
-      }}
-    >
-      <h3>{isNew ? 'Add a movie night' : 'Replace or move this night'}</h3>
-      {!isNew && <p className="sunday-muted">Picking a different movie here swaps it in and drops the current one. To add another night alongside this one, use Add a movie night below.</p>}
-      <label>
-        Movie
-        <select value={movieId} onChange={(e) => onMovieChange(e.target.value)} required>
-          <option value="">Choose movie</option>
-          {movies.map((movie) => {
-            const watch = watchesByMovieId.get(movie.id)
-            const watchLabel = watch ? (isWatched(watch) ? 'watched' : 'scheduled') : null
-            return (
-              <option key={movie.id} value={movie.id}>
-                {movie.title}
-                {watchLabel ? ` (${watchLabel})` : ''}
-              </option>
-            )
-          })}
-        </select>
-      </label>
-      <label>
-        Date
-        <input type="date" value={date} onChange={(e) => onDateChange(e.target.value)} required />
-      </label>
-      <label>
-        Status
-        <select value={status} onChange={(e) => onStatusChange(e.target.value as WatchStatus)}>
-          <option value="scheduled">Scheduled</option>
-          <option value="watched">Watched</option>
-        </select>
-      </label>
-      <div className="sunday-action-row">
-        <button type="submit" className="admin-form-submit" disabled={pending || !movieId}>
-          {isNew ? 'Add to calendar' : 'Save changes'}
-        </button>
-      </div>
-      {error && <p className="admin-form-error">{error}</p>}
-    </form>
   )
 }
 
@@ -572,6 +495,8 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     deleteMovieWatch,
     setVotingDate,
     clearVotingDate,
+    setSkippedDate,
+    clearSkippedDate,
     isAdmin,
     isSignedIn,
     profilesByOwner,
@@ -580,23 +505,12 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(parseLocalDate(todayKey())))
   const [manualSelectedDateKey, setManualSelectedDateKey] = useState<string | null>(null)
   const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null)
-  const [formMovieId, setFormMovieId] = useState('')
-  const [formDate, setFormDate] = useState('')
-  const [formStatus, setFormStatus] = useState<WatchStatus>('scheduled')
-  const [formError, setFormError] = useState('')
-  const [rowPending, setRowPending] = useState(false)
   const [optimisticVoteMovieId, setOptimisticVoteMovieId] = useState<string | null>(null)
   const [votePendingId, setVotePendingId] = useState<string | null>(null)
   const [voteError, setVoteError] = useState('')
-  const [voteDateDraft, setVoteDateDraft] = useState('')
-  const [voteDatePending, setVoteDatePending] = useState(false)
-  const [voteDateError, setVoteDateError] = useState('')
   const [dragError, setDragError] = useState('')
-  const [addMovieId, setAddMovieId] = useState('')
-  const [addDate, setAddDate] = useState('')
-  const [addStatus, setAddStatus] = useState<WatchStatus>('scheduled')
-  const [addError, setAddError] = useState('')
-  const [addPending, setAddPending] = useState(false)
+  const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const [editorTarget, setEditorTarget] = useState<{ dateKey: string; watch: MovieWatchRecord | null } | null>(null)
 
   const movieById = useMemo(() => new Map(movies.map((movie) => [movie.id, movie])), [movies])
   // A "voting" placeholder (a date reserved for a vote, no movie chosen yet) has no
@@ -682,10 +596,6 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   )
   const voteTargetDateKey = localDateKey(voteTargetDate)
 
-  useEffect(() => {
-    setVoteDateDraft(voteTargetDateKey)
-  }, [voteTargetDateKey])
-
   const monthDays = useMemo(() => buildMonthDays(monthCursor, watchesByDate), [monthCursor, watchesByDate])
 
   // "Up next" — the same priority NextUpCard displays: an overdue night, else the
@@ -707,26 +617,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   const selectedWatch = (selectedMovieId ? dayWatches.find((w) => w.movieId === selectedMovieId) : null) ?? dayWatches[0] ?? null
   const selectedMovie = selectedWatch?.movieId ? movieById.get(selectedWatch.movieId) : null
   const isVoteDay = !selectedMovie && selectedDateKey === voteTargetDateKey
-
-  // Keep the admin edit form in step with whichever day/movie is selected —
-  // re-seeded only when that selection changes, not on every incidental data
-  // refresh, so an admin's in-progress edit isn't clobbered by an unrelated vote
-  // coming in.
-  useEffect(() => {
-    setFormMovieId(selectedWatch?.movieId ?? '')
-    setFormDate(selectedDateKey)
-    setFormStatus(selectedWatch ? statusForWatch(selectedWatch) : 'scheduled')
-    setFormError('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDateKey, selectedMovieId])
-
-  // The "add another movie" form defaults its date to whichever day is selected, but
-  // stays independent of it otherwise — an admin can still add a movie to a
-  // completely different date without navigating there first.
-  useEffect(() => {
-    setAddDate(selectedDateKey)
-    setAddError('')
-  }, [selectedDateKey])
+  const isSkipDay = dayWatches[0]?.status === 'skipped'
 
   function selectDate(dateKey: string) {
     setManualSelectedDateKey(dateKey)
@@ -734,107 +625,75 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     setMonthCursor(startOfMonth(parseLocalDate(dateKey)))
   }
 
-  async function submitForm() {
-    if (!formMovieId || !formDate) return
-    setFormError('')
-    setRowPending(true)
-    try {
-      if (selectedWatch?.movieId && selectedWatch.movieId !== formMovieId) {
-        await deleteMovieWatch(selectedWatch.movieId)
+  function movieTitle(watch: MovieWatchRecord) {
+    return (watch.movieId && movieById.get(watch.movieId)?.title) || 'A movie'
+  }
+
+  function openEditor(dateKey: string, watch: MovieWatchRecord | null) {
+    setEditorTarget({ dateKey, watch })
+  }
+
+  // Translates the editor's single unified form into calls against the four
+  // underlying record kinds (real movie / voting placeholder / skip marker) —
+  // see the plan doc for the exact transition table this was validated against.
+  async function saveEvent(originalWatch: MovieWatchRecord | null, originalDateKey: string, form: EventForm) {
+    const { kind, movieId, dateKey, watched, notes } = form
+    if (kind === 'movie' && watched && dateKey > todayKey()) {
+      throw new Error("Can't mark a future date as watched.")
+    }
+    if (kind !== 'movie' && dateKey < todayKey()) {
+      throw new Error(`Can't ${kind === 'voting' ? 'open a vote' : 'skip'} a date that's already passed.`)
+    }
+
+    // Clean up whatever this record used to be, if it's changing kind and/or date.
+    if (originalWatch?.movieId && !(kind === 'movie' && originalWatch.movieId === movieId)) {
+      await deleteMovieWatch(originalWatch.movieId)
+    }
+    if (originalWatch?.status === 'voting' && kind !== 'voting') {
+      await clearVotingDate()
+    }
+    if (originalWatch?.status === 'skipped' && (kind !== 'skipped' || originalDateKey !== dateKey)) {
+      await clearSkippedDate(originalDateKey) // skip's id is date-bound, can't just "move" it
+    }
+
+    if (kind === 'movie') {
+      if (originalWatch) {
+        const collision = (watchesByDate.get(dateKey) ?? []).find((w) => w.movieId && w.movieId !== movieId && w.id !== originalWatch.id)
+        if (collision) throw new Error(`${movieTitle(collision)} is already on that day. Move or remove it first.`)
       }
-      await upsertMovieWatch({
-        movieId: formMovieId,
-        scheduledFor: formDate,
-        watchedAt: formStatus === 'watched' ? formDate : undefined,
-        status: formStatus,
-      })
-      selectDate(formDate)
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Could not save this movie night.')
-    } finally {
-      setRowPending(false)
+      // originalWatch === null ("+ Add event") never blocks — preserves the
+      // existing ability to stack a second movie onto an already-occupied day.
+      await upsertMovieWatch({ movieId, scheduledFor: dateKey, watchedAt: watched ? dateKey : undefined, status: watched ? 'watched' : 'scheduled', notes })
+    } else if (kind === 'voting') {
+      const occupant = (watchesByDate.get(dateKey) ?? []).find((w) => w.movieId && w.id !== originalWatch?.id)
+      if (occupant) throw new Error(`${movieTitle(occupant)} is already scheduled for that date. Choose a different one, or edit that night instead.`)
+      await setVotingDate(dateKey, notes)
+    } else {
+      // 'skipped' — matches the previous skip handler's silent-replace behavior.
+      const occupant = (watchesByDate.get(dateKey) ?? []).find((w) => w.movieId && w.id !== originalWatch?.id)
+      if (occupant?.movieId) await deleteMovieWatch(occupant.movieId)
+      await setSkippedDate(dateKey, notes)
     }
+    selectDate(dateKey)
   }
 
-  // Always available regardless of what's currently selected — unlike submitForm
-  // (which can replace whichever movie is already on the selected day), this only
-  // ever touches the record for the chosen movie, so it's the one safe way to add a
-  // second movie to a day that already has one.
-  async function submitAddWatch() {
-    if (!addMovieId || !addDate) return
-    setAddError('')
-    setAddPending(true)
-    try {
-      await upsertMovieWatch({
-        movieId: addMovieId,
-        scheduledFor: addDate,
-        watchedAt: addStatus === 'watched' ? addDate : undefined,
-        status: addStatus,
-      })
-      selectDate(addDate)
-      setSelectedMovieId(addMovieId)
-      setAddMovieId('')
-    } catch (err) {
-      setAddError(err instanceof Error ? err.message : 'Could not add this movie night.')
-    } finally {
-      setAddPending(false)
-    }
+  async function deleteEvent(watch: MovieWatchRecord) {
+    if (watch.movieId) return deleteMovieWatch(watch.movieId)
+    if (watch.status === 'voting') return clearVotingDate()
+    return clearSkippedDate(localDateKey(watchStart(watch)))
   }
 
-  async function markWatchedNow(watch: MovieWatchRecord) {
-    if (!watch.movieId) return
-    setFormError('')
-    setRowPending(true)
-    try {
-      await upsertMovieWatch({
-        movieId: watch.movieId,
-        scheduledFor: watch.scheduledFor ?? todayKey(),
-        watchedAt: todayKey(),
-        status: 'watched',
-      })
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Could not mark this movie watched.')
-    } finally {
-      setRowPending(false)
-    }
-  }
-
-  async function removeWatch(watch: MovieWatchRecord) {
-    if (!watch.movieId) return
-    const movie = movieById.get(watch.movieId)
-    const label = movie?.title ?? 'this movie'
-    const confirmMessage = isWatched(watch)
-      ? `Mark ${label} as not watched? It will drop out of the group ranking until it's watched again.`
-      : `Remove ${label} from the schedule? It goes back to being open for votes.`
-    if (!window.confirm(confirmMessage)) return
-    setFormError('')
-    setRowPending(true)
-    try {
-      await deleteMovieWatch(watch.movieId)
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Could not update the schedule.')
-    } finally {
-      setRowPending(false)
-    }
-  }
-
-  async function handleSetVoteDate(dateKey: string) {
-    if (!dateKey) return
-    setVoteDateError('')
-    const occupant = watchesByDate.get(dateKey)?.find((watch) => watch.movieId)
-    if (occupant) {
-      const title = movieById.get(occupant.movieId as string)?.title ?? 'A movie'
-      setVoteDateError(`${title} is already scheduled for that date. Choose a different one, or change that night instead.`)
-      return
-    }
-    setVoteDatePending(true)
-    try {
-      await setVotingDate(dateKey)
-    } catch (err) {
-      setVoteDateError(err instanceof Error ? err.message : 'Could not change the vote date.')
-    } finally {
-      setVoteDatePending(false)
-    }
+  async function handleDeleteEvent(watch: MovieWatchRecord) {
+    const confirmMessage = watch.movieId
+      ? isWatched(watch)
+        ? `Mark ${movieTitle(watch)} as not watched? It will drop out of the group ranking until it's watched again.`
+        : `Remove ${movieTitle(watch)} from the schedule? It goes back to being open for votes.`
+      : watch.status === 'voting'
+        ? 'Reset the vote date to the next open Sunday?'
+        : 'Undo the skip for this day?'
+    if (!window.confirm(confirmMessage)) return false
+    await deleteEvent(watch)
+    return true
   }
 
   async function handleDropMovie(sourceDateKey: string, targetDateKey: string) {
@@ -848,27 +707,18 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
       return
     }
     try {
+      // A watched night dragged onto a future date can't stay "watched" there — it
+      // hasn't happened on that date yet — so it drops back to merely scheduled.
+      const staysWatched = isWatched(sourceWatch) && targetDateKey <= todayKey()
       await upsertMovieWatch({
         movieId: sourceWatch.movieId,
         scheduledFor: targetDateKey,
-        watchedAt: isWatched(sourceWatch) ? targetDateKey : undefined,
-        status: statusForWatch(sourceWatch),
+        watchedAt: staysWatched ? targetDateKey : undefined,
+        status: staysWatched ? 'watched' : 'scheduled',
       })
       selectDate(targetDateKey)
     } catch (err) {
       setDragError(err instanceof Error ? err.message : 'Could not move this movie night.')
-    }
-  }
-
-  async function handleResetVoteDate() {
-    setVoteDateError('')
-    setVoteDatePending(true)
-    try {
-      await clearVotingDate()
-    } catch (err) {
-      setVoteDateError(err instanceof Error ? err.message : 'Could not reset the vote date.')
-    } finally {
-      setVoteDatePending(false)
     }
   }
 
@@ -888,31 +738,17 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     }
   }
 
-  function downloadSchedule() {
-    const body = allMovieWatches
-      .filter((watch) => watchStart(watch))
-      .map((watch) => {
-        const movie = watch.movieId ? movieById.get(watch.movieId) : undefined
-        const startsAt = watchStart(watch)
-        if (!movie || !startsAt) return ''
-        const start = toIcsAllDayDate(startsAt)
-        const end = toIcsAllDayDate(nextDateKey(startsAt))
-        return [`BEGIN:VEVENT`, `UID:${watch.id}@family-bonding`, `DTSTAMP:${toIcsTimestamp(new Date().toISOString())}`, `DTSTART;VALUE=DATE:${start}`, `DTEND;VALUE=DATE:${end}`, `SUMMARY:Family Bonding: ${movie.title}`, `END:VEVENT`].join('\r\n')
-      })
-      .filter(Boolean)
-      .join('\r\n')
-    downloadCalendar('family-bonding.ics', ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Family Bonding//Sunday Schedule//EN', body, 'END:VCALENDAR'].join('\r\n'))
-  }
-
   return (
     <div className="sunday-page">
       <section className="sunday-hero">
         <div>
           <h2>Upcoming</h2>
         </div>
-        <button type="button" className="secondary-button" onClick={downloadSchedule} disabled={allMovieWatches.length === 0}>
-          Download calendar
-        </button>
+        {icsFeedUrl && (
+          <button type="button" className="secondary-button" onClick={() => setSubscribeOpen(true)}>
+            Subscribe
+          </button>
+        )}
       </section>
 
       <NextUpCard
@@ -940,6 +776,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
         onToday={() => setMonthCursor(startOfMonth(parseLocalDate(todayKey())))}
         onDayClick={selectDate}
         onDropMovie={(source, target) => void handleDropMovie(source, target)}
+        onAddEvent={() => openEditor(selectedDateKey, null)}
       />
 
       <section className="sunday-day-details">
@@ -947,7 +784,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
           <h2>{formatDisplayDate(selectedDateKey)}</h2>
         </div>
 
-        {dayWatches.length > 0 && (
+        {dayWatches.some((watch) => watch.movieId) && (
           <div className="ranked-list">
             {dayWatches.map((watch) => {
               const movie = watch.movieId ? movieById.get(watch.movieId) : null
@@ -968,14 +805,13 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
                       {isAdmin && (
                         <button
                           type="button"
-                          className="unrank-button"
-                          disabled={rowPending}
+                          className="secondary-button"
                           onClick={(e) => {
                             e.stopPropagation()
-                            void removeWatch(watch)
+                            openEditor(selectedDateKey, watch)
                           }}
                         >
-                          Remove
+                          Edit
                         </button>
                       )}
                     </span>
@@ -986,7 +822,9 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
           </div>
         )}
 
-        {selectedMovie ? null : isVoteDay ? (
+        {selectedMovie ? null : isSkipDay ? (
+          <p className="empty-state">No movie night planned for this day.</p>
+        ) : isVoteDay ? (
           <>
             {totalMembers > 0 && <p className="sunday-muted">{currentVotes.length} of {totalMembers} members have voted</p>}
             <VoteList
@@ -1004,84 +842,28 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
           <p className="empty-state">Nothing planned for this day yet.</p>
         )}
 
-        {isAdmin && (
-          <div className="sunday-day-admin">
-            {isVoteDay ? (
-              <form
-                className="sunday-action-row"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void handleSetVoteDate(voteDateDraft)
-                }}
-              >
-                <input type="date" value={voteDateDraft} onChange={(e) => setVoteDateDraft(e.target.value)} aria-label="Vote date" required />
-                <button type="submit" className="secondary-button" disabled={voteDatePending}>
-                  Change vote date
-                </button>
-                {pendingVoteWatch && (
-                  <button type="button" className="secondary-button" onClick={() => void handleResetVoteDate()} disabled={voteDatePending}>
-                    Reset to next Sunday
-                  </button>
-                )}
-              </form>
-            ) : (
-              !selectedMovie && (
-                <div className="sunday-action-row">
-                  <button type="button" className="secondary-button" onClick={() => void handleSetVoteDate(selectedDateKey)} disabled={voteDatePending}>
-                    Vote here instead, no movie yet
-                  </button>
-                </div>
-              )
-            )}
-            {voteDateError && <p className="admin-form-error">{voteDateError}</p>}
-
-            {selectedWatch?.movieId && (
-              <div className="sunday-action-row">
-                {!isWatched(selectedWatch) && (
-                  <button type="button" className="secondary-button" onClick={() => void markWatchedNow(selectedWatch)} disabled={rowPending}>
-                    Mark watched
-                  </button>
-                )}
-                <button type="button" className="unrank-button" onClick={() => void removeWatch(selectedWatch)} disabled={rowPending}>
-                  {isWatched(selectedWatch) ? 'Undo' : 'Unschedule'}
-                </button>
-              </div>
-            )}
-
-            {selectedWatch?.movieId && (
-              <ScheduleForm
-                isNew
-                movies={movies}
-                watchesByMovieId={watchesByMovieId}
-                movieId={addMovieId}
-                date={addDate}
-                status={addStatus}
-                pending={addPending}
-                error={addError}
-                onMovieChange={setAddMovieId}
-                onDateChange={setAddDate}
-                onStatusChange={setAddStatus}
-                onSubmit={() => void submitAddWatch()}
-              />
-            )}
-
-            <ScheduleForm
-              isNew={!selectedWatch?.movieId}
-              movies={movies}
-              watchesByMovieId={watchesByMovieId}
-              movieId={formMovieId}
-              date={formDate}
-              status={formStatus}
-              pending={rowPending}
-              error={formError}
-              onMovieChange={setFormMovieId}
-              onDateChange={setFormDate}
-              onStatusChange={setFormStatus}
-              onSubmit={() => void submitForm()}
-            />
+        {isAdmin && !dayWatches.some((watch) => watch.movieId) && (
+          <div className="sunday-action-row">
+            <button type="button" className="secondary-button" onClick={() => openEditor(selectedDateKey, dayWatches[0] ?? null)}>
+              Edit this day
+            </button>
           </div>
         )}
       </section>
+
+      {editorTarget && (
+        <EventEditorModal
+          dateKey={editorTarget.dateKey}
+          watch={editorTarget.watch}
+          movies={movies}
+          watchesByMovieId={watchesByMovieId}
+          onSave={(form) => saveEvent(editorTarget.watch, editorTarget.dateKey, form)}
+          onDelete={() => handleDeleteEvent(editorTarget.watch!)}
+          onClose={() => setEditorTarget(null)}
+        />
+      )}
+
+      {subscribeOpen && icsFeedUrl && <SubscribeModal feedUrl={icsFeedUrl} onClose={() => setSubscribeOpen(false)} />}
     </div>
   )
 }

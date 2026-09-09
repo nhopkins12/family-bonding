@@ -10,9 +10,60 @@
          full fix for the toolbar staying light in a normal Safari tab. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- The title's Futura Black font (large enough to matter on a slow load) would
+         otherwise only start fetching once index.css finishes parsing and something
+         asks to render it — preloading gets the request started immediately instead,
+         so the font-display:swap swap-in happens sooner. -->
+    <link rel="preload" href="/fonts/futura-black.ttf" as="font" type="font/ttf" crossorigin />
     <title>Family Bonding</title>
+    <script>
+      // Applies the stored theme/animations preference to <html> before React (or
+      // even the CSS's own @media(prefers-color-scheme) fallback) gets a chance to
+      // paint anything, specifically for the one case that fallback can't cover:
+      // someone whose stored override *disagrees* with their OS-level preference
+      // (e.g. explicitly chose dark while the system is set to light). Without this,
+      // first paint uses the system-preference CSS, then a React effect corrects it
+      // a beat later — a real, visible flash of the wrong theme on every load, not a
+      // hypothetical one. Kept intentionally tiny and dependency-free since it runs
+      // before any other script or stylesheet.
+      try {
+        var theme = localStorage.getItem('family-bonding:theme')
+        if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme)
+        var animations = localStorage.getItem('family-bonding:animations-enabled')
+        document.documentElement.setAttribute('data-animations', animations === 'off' ? 'off' : 'on')
+      } catch (e) {
+        // Storage can throw in a locked-down context (private browsing, disabled
+        // storage) — falling back to the CSS-only system-preference default is
+        // completely fine, just skip the override.
+      }
+    </script>
+    <!-- Covers the screen solid black on the very first possible paint, before
+         index.css (or any JS) has had a chance to load — otherwise there's a real
+         gap where the browser can paint the bare, unstyled page underneath before
+         React mounts and the real animated splash (GunBarrelLoader/DotsSweepLoader,
+         both black-background) takes over. This div is styled inline specifically
+         so it never depends on the external stylesheet. React removes it (see
+         App.tsx) the instant its own first render commits — by then the real splash
+         (same black background) is already painted in its place, or, if animations
+         are off, the real content is ready to show immediately instead. Hidden
+         outright when animations are off (via the data-animations attribute the
+         script above already set) so turning off the splash really means no black
+         screen at all, not even a brief one. -->
+
+    <style>
+      #preload-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: #0b0b0d;
+      }
+      html[data-animations='off'] #preload-splash {
+        display: none;
+      }
+    </style>
   </head>
   <body>
+    <div id="preload-splash"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

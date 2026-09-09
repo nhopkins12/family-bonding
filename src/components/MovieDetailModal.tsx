@@ -42,6 +42,7 @@ export function MovieDetailContent({ movieId, onOpenProfile }: { movieId: string
           <p className="modal-meta">
             {movie.year} · {movie.actor}
           </p>
+          {watch?.notes && <p className="modal-meta">{watch.notes}</p>}
         </div>
       </div>
 
