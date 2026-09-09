@@ -3,7 +3,7 @@ import type { MovieRecord, MovieWatchRecord } from '../lib/dataClient'
 import { todayKey } from '../lib/watchDates'
 import { ModalBackdrop } from './ModalBackdrop'
 
-export type EventKind = 'movie' | 'voting' | 'skipped'
+export type EventKind = 'movie' | 'voting'
 
 export interface EventForm {
   dateKey: string
@@ -27,29 +27,18 @@ function isWatchedRecord(watch: MovieWatchRecord) {
   return Boolean(watch.watchedAt || watch.status === 'watched')
 }
 
-function deleteLabel(watch: MovieWatchRecord | null) {
-  if (!watch) return null
-  if (watch.status === 'voting') return 'Skip this day'
-  if (watch.status === 'skipped') return 'Undo skip'
-  return 'Delete'
-}
-
 /**
  * The one place an admin adds, edits, relocates, or removes anything on the
- * calendar — a real movie, an open vote slot, or a deliberate skip are all just
- * different answers to "what's happening on this date," edited from the same form
- * instead of three separate stacked ones.
+ * calendar — a real movie or an open, not-yet-decided night are just different
+ * answers to "what's happening on this date," edited from the same form.
  */
 export function EventEditorModal({ dateKey, watch, movies, watchesByMovieId, onSave, onDelete, onClose }: EventEditorModalProps) {
   const [dateDraft, setDateDraft] = useState(dateKey)
   const [movieIdDraft, setMovieIdDraft] = useState(watch?.movieId ?? '')
-  const [kindDraft, setKindDraft] = useState<'voting' | 'skipped'>(watch?.status === 'skipped' ? 'skipped' : 'voting')
   const [watchedDraft, setWatchedDraft] = useState(watch ? isWatchedRecord(watch) : false)
   const [notesDraft, setNotesDraft] = useState(watch?.notes ?? '')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
-
-  const removeLabel = deleteLabel(watch)
 
   async function handleSave() {
     setError('')
@@ -57,7 +46,7 @@ export function EventEditorModal({ dateKey, watch, movies, watchesByMovieId, onS
     try {
       await onSave({
         dateKey: dateDraft,
-        kind: movieIdDraft ? 'movie' : kindDraft,
+        kind: movieIdDraft ? 'movie' : 'voting',
         movieId: movieIdDraft,
         watched: watchedDraft,
         notes: notesDraft.trim(),
@@ -118,7 +107,7 @@ export function EventEditorModal({ dateKey, watch, movies, watchesByMovieId, onS
             <label>
               Movie
               <select value={movieIdDraft} onChange={(e) => setMovieIdDraft(e.target.value)}>
-                <option value="">No movie — open slot</option>
+                <option value="">No movie, open for voting</option>
                 {movies.map((movie) => {
                   const existingWatch = watchesByMovieId.get(movie.id)
                   const watchLabel = existingWatch ? (isWatchedRecord(existingWatch) ? 'watched' : 'scheduled') : null
@@ -133,19 +122,6 @@ export function EventEditorModal({ dateKey, watch, movies, watchesByMovieId, onS
             </label>
 
             {movieIdDraft && watch?.movieId && <p className="sunday-muted">Changing the movie here replaces this event.</p>}
-
-            {!movieIdDraft && (
-              <div className="admin-form-radio-group">
-                <label className="admin-form-checkbox">
-                  <input type="radio" name="event-kind" checked={kindDraft === 'voting'} onChange={() => setKindDraft('voting')} />
-                  Open for voting
-                </label>
-                <label className="admin-form-checkbox">
-                  <input type="radio" name="event-kind" checked={kindDraft === 'skipped'} onChange={() => setKindDraft('skipped')} />
-                  Skip this day, no movie night
-                </label>
-              </div>
-            )}
 
             {movieIdDraft && dateDraft <= todayKey() && (
               <label className="admin-form-checkbox">
@@ -163,9 +139,9 @@ export function EventEditorModal({ dateKey, watch, movies, watchesByMovieId, onS
               <button type="submit" className="admin-form-submit" disabled={pending}>
                 Save
               </button>
-              {removeLabel && (
+              {watch && (
                 <button type="button" className="unrank-button" disabled={pending} onClick={() => void handleDelete()}>
-                  {removeLabel}
+                  Delete
                 </button>
               )}
             </div>
