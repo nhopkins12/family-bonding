@@ -575,14 +575,16 @@ h3 {
 .sunday-hero,
 .sunday-next-card,
 .sunday-calendar,
-.sunday-day-details {
+.sunday-day-details,
+.sunday-subscribe {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
 }
 
-.sunday-hero {
+.sunday-hero,
+.sunday-subscribe {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -590,9 +592,14 @@ h3 {
   padding: var(--space-4);
 }
 
-.sunday-hero h2 {
+.sunday-hero h2,
+.sunday-subscribe h2 {
   font-size: var(--text-lg);
   margin-bottom: 0;
+}
+
+.sunday-subscribe .sunday-muted {
+  margin: 0;
 }
 
 .sunday-card-label,
@@ -811,17 +818,9 @@ h3 {
   background: color-mix(in srgb, var(--accent-soft) 8%, var(--bg-card));
 }
 
-/* Deliberately skipped — a plain gray wash, not the gold used for a real event, so
-   it reads at a glance as "nothing happening here on purpose" rather than "watch
-   night" or "vote open". */
-.month-calendar-day.skipped {
-  background: var(--bg-hover);
-}
-
 .month-calendar-day.scheduled .month-calendar-date,
 .month-calendar-day.watched .month-calendar-date,
-.month-calendar-day.voting .month-calendar-date,
-.month-calendar-day.skipped .month-calendar-date {
+.month-calendar-day.voting .month-calendar-date {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
@@ -841,19 +840,6 @@ h3 {
 .month-calendar-day.voting .month-calendar-date {
   background: var(--accent-soft);
   color: var(--accent-dim);
-}
-
-.month-calendar-day.skipped .month-calendar-date {
-  background: var(--border);
-  color: var(--text-muted);
-}
-
-.month-calendar-day.skipped .month-calendar-event {
-  background: var(--border);
-}
-
-.month-calendar-day.skipped .month-calendar-event-title {
-  color: var(--text-muted);
 }
 
 .month-calendar-date {
@@ -1087,6 +1073,28 @@ h3 {
 }
 
 .movie-card:hover {
+  border-color: var(--accent-dim);
+  background: var(--bg-hover);
+}
+
+/* A day-details row for a MovieWatch with no movie attached (an open placeholder)
+   — same look as .movie-card, but plain text in place of a
+   poster/title pair, and it's the <button> itself rather than wrapping one. */
+.sunday-placeholder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.sunday-placeholder-row:hover {
   border-color: var(--accent-dim);
   background: var(--bg-hover);
 }
@@ -2017,6 +2025,7 @@ a.admin-form-submit {
 
 @media (max-width: 480px) {
   .sunday-hero,
+  .sunday-subscribe,
   .section-header-row {
     flex-direction: column;
     align-items: stretch;

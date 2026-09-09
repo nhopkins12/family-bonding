@@ -2,7 +2,6 @@ import { defineBackend } from '@aws-amplify/backend'
 import { Stack } from 'aws-cdk-lib'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { FunctionUrlAuthType, type Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda'
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { createMember } from './functions/create-member/resource'
@@ -73,18 +72,13 @@ new Policy(Stack.of(backend.data), 'GuestReadAccessPolicy', {
 // --- Subscribable ICS calendar feed: unguessable, unauthenticated, read-only -----
 // A Lambda Function URL rather than a GraphQL query — calendar apps re-fetch a
 // subscription URL with a plain unauthenticated GET on their own schedule, which
-// AppSync has no way to serve. Gated by a CDK-generated secret path token instead of
-// real sign-in, since a subscribing calendar app can't do interactive auth either.
+// AppSync has no way to serve. Protection is the Function URL's own random subdomain
+// being hard to guess — there's no content worth hiding behind more than that here
+// (same movie schedule/vote data guest reads already see in-app), and the URL is
+// already handed to every visitor via the Subscribe button regardless of sign-in, so
+// a second secret layered on top wouldn't actually keep anyone out who could already
+// get the URL from the app itself.
 const icsFeedLambda = backend.icsFeed.resources.lambda as LambdaFunction
-
-// Scoped into icsFeed's own stack — this secret has exactly one consumer, so unlike
-// the GuestReadAccessPolicy above there's no cross-stack dependency to reason about.
-const icsFeedSecret = new secretsmanager.Secret(Stack.of(icsFeedLambda), 'IcsFeedToken', {
-  description: 'Unguessable path token for the read-only ICS calendar subscription feed.',
-  generateSecretString: { passwordLength: 40, excludePunctuation: true }, // URL-path-safe, no encoding needed
-})
-icsFeedSecret.grantRead(icsFeedLambda)
-icsFeedLambda.addEnvironment('ICS_FEED_SECRET_ARN', icsFeedSecret.secretArn)
 
 const movieTable = backend.data.resources.tables['Movie']
 const movieWatchTable = backend.data.resources.tables['MovieWatch']

@@ -5,7 +5,6 @@
 export interface IcsMovieWatch {
   id: string
   movieId?: string | null
-  status: string
   watchedAt?: string | null
   scheduledFor?: string | null
 }
@@ -121,7 +120,9 @@ export function buildIcsCalendar(watches: IcsMovieWatch[], movies: Map<string, I
       // An open, not-yet-decided movie night — still a real calendar event (a
       // placeholder for movie night, not "nothing"), just with the candidates and
       // their current vote counts in the description instead of a chosen title.
-      if (watch.status === 'voting' && watch.scheduledFor) {
+      // Matched by "no movie" rather than a specific status string, same as the
+      // app itself: any non-movie row is an open placeholder, full stop.
+      if (watch.scheduledFor) {
         const start = toIcsAllDayDate(watch.scheduledFor)
         const end = toIcsAllDayDate(nextDateKey(watch.scheduledFor))
         return [
