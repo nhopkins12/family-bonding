@@ -42,7 +42,8 @@ interface AppDataContextValue {
   upsertMovieWatch: (input: { movieId: string; scheduledFor?: string; watchedAt?: string; status: string; notes?: string }) => Promise<void>
   deleteMovieWatch: (movieId: string) => Promise<void>
   setVotingDate: (dateKey: string, notes?: string) => Promise<void>
-  clearVotingDate: () => Promise<void>
+  clearVotingDate: (dateKey: string) => Promise<void>
+  ensureVotingPlaceholders: (dateKeys: string[]) => Promise<void>
   setSkippedDate: (dateKey: string, notes?: string) => Promise<void>
   clearSkippedDate: (dateKey: string) => Promise<void>
   createMovie: (input: { title: string; year: number; actor: string; posterUrl: string }) => Promise<void>
@@ -93,7 +94,7 @@ type UpsertModel = {
 }
 
 /**
- * Every MovieWatch row here uses a deterministic id (movieId, 'pending-vote', or
+ * Every MovieWatch row here uses a deterministic id (movieId, vote-<dateKey>, or
  * skip-<dateKey>) instead of a random one, specifically so re-touching the same
  * logical record updates it in place rather than duplicating it. That means the
  * create-vs-update choice has to be right, but the live `allMovieWatches` list this
@@ -112,11 +113,18 @@ async function upsertById(model: UpsertModel, payload: Record<string, unknown>, 
   return fallback(payload)
 }
 
-// Deterministic per-date id (unlike the voting placeholder's fixed singleton id) so
-// re-skipping the same date updates the same row instead of creating duplicates, and
-// several different dates can each carry their own skip marker at once.
+// Deterministic per-date id so re-skipping the same date updates the same row instead
+// of creating duplicates, and several different dates can each carry their own skip
+// marker at once.
 function skipRecordId(dateKey: string) {
   return `skip-${dateKey}`
+}
+
+// Deterministic per-date id, same reasoning as skipRecordId — every open Sunday gets
+// its own "voting" placeholder row, so several can be open across different weeks at
+// once instead of there being a single system-wide vote slot.
+function voteRecordId(dateKey: string) {
+  return `vote-${dateKey}`
 }
 
 export function AppDataProvider({
@@ -505,17 +513,22 @@ export function AppDataProvider({
     [allMovieWatches, isAdmin],
   )
 
-  // Reserves a date for "movie night" before a movie has been picked — voting keeps
-  // working exactly the same, it just targets this date instead of the auto-picked
-  // next Sunday. Only one such placeholder exists at a time (id is fixed), so setting
-  // a new date just moves it rather than leaving old ones behind.
+  // Reserves a date for "movie night" before a movie has been picked. Every open
+  // Sunday carries its own placeholder row (id is date-bound, like the skip marker
+  // below), so several weeks can each be open for voting at the same time instead of
+  // there being one system-wide vote slot.
   const setVotingDate = useCallback(
     async (dateKey: string, notes?: string) => {
       if (!isAdmin) throw new Error('Only admins can change the vote date.')
       const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
       if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
-      const existing = allMovieWatches.find((watch) => watch.status === 'voting')
-      const payload = { id: 'pending-vote', status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null, notes: notes || null }
+      // Matched by date+status rather than assuming the new vote-<dateKey> id shape,
+      // so a placeholder created under the old fixed 'pending-vote' id (from before
+      // dates got their own ids) is still found and updated in place instead of
+      // leaving that row orphaned next to a brand new one.
+      const existing = allMovieWatches.find((watch) => watch.status === 'voting' && watch.scheduledFor === dateKey)
+      const id = existing?.id ?? voteRecordId(dateKey)
+      const payload = { id, status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null, notes: notes || null }
       assertNoDataErrors(await upsertById(model, payload, Boolean(existing)))
       // Opening this date up for voting overrides any earlier "skip this day" marker.
       const skip = allMovieWatches.find((watch) => watch.id === skipRecordId(dateKey))
@@ -524,13 +537,36 @@ export function AppDataProvider({
     [allMovieWatches, isAdmin],
   )
 
-  const clearVotingDate = useCallback(async () => {
-    if (!isAdmin) throw new Error('Only admins can change the vote date.')
-    const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
-    if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
-    const existing = allMovieWatches.find((watch) => watch.status === 'voting')
-    if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
-  }, [allMovieWatches, isAdmin])
+  const clearVotingDate = useCallback(
+    async (dateKey: string) => {
+      if (!isAdmin) throw new Error('Only admins can change the vote date.')
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) throw new Error('Movie watch scheduling is not deployed yet.')
+      const existing = allMovieWatches.find((watch) => watch.status === 'voting' && watch.scheduledFor === dateKey)
+      if (existing) assertNoDataErrors(await model.delete({ id: existing.id }))
+    },
+    [allMovieWatches, isAdmin],
+  )
+
+  // Backfills a plain "voting" placeholder onto every given date that has no
+  // MovieWatch row at all yet — the mechanism that keeps upcoming Sundays showing up
+  // as real open-vote events on the calendar instead of a blank cell. The caller (the
+  // calendar view) is responsible for only passing dates it has already confirmed are
+  // empty; a non-admin viewer simply doesn't trigger this, same as every other write here.
+  const ensureVotingPlaceholders = useCallback(
+    async (dateKeys: string[]) => {
+      if (!isAdmin || dateKeys.length === 0) return
+      const model = (client.models as { MovieWatch?: typeof client.models.MovieWatch }).MovieWatch
+      if (!model) return
+      await Promise.all(
+        dateKeys.map(async (dateKey) => {
+          const payload = { id: voteRecordId(dateKey), status: 'voting', scheduledFor: dateKey, movieId: null, watchedAt: null, notes: null }
+          assertNoDataErrors(await upsertById(model, payload, false))
+        }),
+      )
+    },
+    [isAdmin],
+  )
 
   // Marks a date as deliberately skipped — no movie night that week, and the
   // auto-picked "next open Sunday" (see nextOpenSunday in WatchPlanner) treats any
@@ -605,6 +641,7 @@ export function AppDataProvider({
       deleteMovieWatch,
       setVotingDate,
       clearVotingDate,
+      ensureVotingPlaceholders,
       setSkippedDate,
       clearSkippedDate,
       createMovie,
@@ -634,6 +671,7 @@ export function AppDataProvider({
       deleteMovieWatch,
       setVotingDate,
       clearVotingDate,
+      ensureVotingPlaceholders,
       setSkippedDate,
       clearSkippedDate,
       createMovie,

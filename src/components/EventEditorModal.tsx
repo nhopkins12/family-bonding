@@ -29,7 +29,7 @@ function isWatchedRecord(watch: MovieWatchRecord) {
 
 function deleteLabel(watch: MovieWatchRecord | null) {
   if (!watch) return null
-  if (watch.status === 'voting') return 'Reset to next Sunday'
+  if (watch.status === 'voting') return 'Skip this day'
   if (watch.status === 'skipped') return 'Undo skip'
   return 'Delete'
 }

@@ -20,6 +20,7 @@ import { MovieCard } from './MovieCard'
 import { PosterImage } from './PosterImage'
 import { EventEditorModal, type EventForm } from './EventEditorModal'
 import { SubscribeModal } from './SubscribeModal'
+import { RandomPickModal } from './RandomPickModal'
 
 interface WatchPlannerProps {
   onOpenMovie: (movieId: string) => void
@@ -475,7 +476,6 @@ function CalendarDayCell({ day, movieById, isSelected, isAdmin, isDragging, onCl
           <span className="month-calendar-event-title">No movie</span>
         </span>
       )}
-      {!watch && day.isSunday && !day.isPast && <span className="month-calendar-open">Open</span>}
       {day.watches.length > 1 && <span className="month-calendar-count">+{day.watches.length - 1}</span>}
     </button>
   )
@@ -495,6 +495,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     deleteMovieWatch,
     setVotingDate,
     clearVotingDate,
+    ensureVotingPlaceholders,
     setSkippedDate,
     clearSkippedDate,
     isAdmin,
@@ -510,6 +511,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   const [voteError, setVoteError] = useState('')
   const [dragError, setDragError] = useState('')
   const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const [randomPickOpen, setRandomPickOpen] = useState(false)
   const [editorTarget, setEditorTarget] = useState<{ dateKey: string; watch: MovieWatchRecord | null } | null>(null)
 
   const movieById = useMemo(() => new Map(movies.map((movie) => [movie.id, movie])), [movies])
@@ -549,7 +551,15 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     () => sortedWatches.filter((watch) => watch.movieId && !isWatched(watch) && !isOverdue(watch) && watch.scheduledFor),
     [sortedWatches],
   )
-  const pendingVoteWatch = useMemo(() => allMovieWatches.find((watch) => watch.status === 'voting') ?? null, [allMovieWatches])
+  // Several Sundays can be open for voting at once now — "pending" here means the
+  // soonest upcoming one, for the "up next" summary widgets below.
+  const pendingVoteWatch = useMemo(() => {
+    const today = todayKey()
+    const upcoming = allMovieWatches
+      .filter((watch) => watch.status === 'voting' && watch.scheduledFor && watch.scheduledFor >= today)
+      .sort((a, b) => String(a.scheduledFor).localeCompare(String(b.scheduledFor)))
+    return upcoming[0] ?? null
+  }, [allMovieWatches])
 
   const currentVotes = useMemo(() => latestVoteByOwner(allWatchVotes), [allWatchVotes])
   const myCurrentVote = useMemo(() => latestVoteByOwner([...myVotesByMovieId.values()])[0] ?? null, [myVotesByMovieId])
@@ -598,6 +608,20 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
 
   const monthDays = useMemo(() => buildMonthDays(monthCursor, watchesByDate), [monthCursor, watchesByDate])
 
+  // Every future Sunday visible on the calendar should read as a real "open for
+  // voting" event, not a blank cell — so as an admin browses the calendar, any such
+  // Sunday still missing a MovieWatch row of any kind gets one backfilled automatically.
+  // Self-limiting: once the placeholder exists, day.watches is no longer empty and this
+  // stops asking for it again.
+  const missingVoteSundayKeys = useMemo(
+    () => monthDays.filter((day) => day.isSunday && !day.isPast && day.watches.length === 0).map((day) => day.key),
+    [monthDays],
+  )
+  useEffect(() => {
+    if (!isAdmin || missingVoteSundayKeys.length === 0) return
+    void ensureVotingPlaceholders(missingVoteSundayKeys)
+  }, [isAdmin, missingVoteSundayKeys, ensureVotingPlaceholders])
+
   // "Up next" — the same priority NextUpCard displays: an overdue night, else the
   // nearest upcoming one, else wherever the open vote is currently targeting.
   const upcomingDateKey = overdueWatches[0]
@@ -616,7 +640,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
   const dayWatches = watchesByDate.get(selectedDateKey) ?? []
   const selectedWatch = (selectedMovieId ? dayWatches.find((w) => w.movieId === selectedMovieId) : null) ?? dayWatches[0] ?? null
   const selectedMovie = selectedWatch?.movieId ? movieById.get(selectedWatch.movieId) : null
-  const isVoteDay = !selectedMovie && selectedDateKey === voteTargetDateKey
+  const isVoteDay = !selectedMovie && selectedWatch?.status === 'voting'
   const isSkipDay = dayWatches[0]?.status === 'skipped'
 
   function selectDate(dateKey: string) {
@@ -649,8 +673,8 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
     if (originalWatch?.movieId && !(kind === 'movie' && originalWatch.movieId === movieId)) {
       await deleteMovieWatch(originalWatch.movieId)
     }
-    if (originalWatch?.status === 'voting' && kind !== 'voting') {
-      await clearVotingDate()
+    if (originalWatch?.status === 'voting' && (kind !== 'voting' || originalDateKey !== dateKey)) {
+      await clearVotingDate(originalDateKey) // voting's id is date-bound, can't just "move" it
     }
     if (originalWatch?.status === 'skipped' && (kind !== 'skipped' || originalDateKey !== dateKey)) {
       await clearSkippedDate(originalDateKey) // skip's id is date-bound, can't just "move" it
@@ -679,7 +703,11 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
 
   async function deleteEvent(watch: MovieWatchRecord) {
     if (watch.movieId) return deleteMovieWatch(watch.movieId)
-    if (watch.status === 'voting') return clearVotingDate()
+    // Dropping an open vote night marks the day skipped rather than just deleting the
+    // row — every future Sunday auto-refills with a voting placeholder (see
+    // missingVoteSundayKeys above), so a plain delete would just reappear on the next
+    // render. Skipping the day is what actually sticks.
+    if (watch.status === 'voting') return setSkippedDate(localDateKey(watchStart(watch)), watch.notes ?? undefined)
     return clearSkippedDate(localDateKey(watchStart(watch)))
   }
 
@@ -689,7 +717,7 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
         ? `Mark ${movieTitle(watch)} as not watched? It will drop out of the group ranking until it's watched again.`
         : `Remove ${movieTitle(watch)} from the schedule? It goes back to being open for votes.`
       : watch.status === 'voting'
-        ? 'Reset the vote date to the next open Sunday?'
+        ? 'Skip this day — no movie night, no open vote?'
         : 'Undo the skip for this day?'
     if (!window.confirm(confirmMessage)) return false
     await deleteEvent(watch)
@@ -744,11 +772,6 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
         <div>
           <h2>Upcoming</h2>
         </div>
-        {icsFeedUrl && (
-          <button type="button" className="secondary-button" onClick={() => setSubscribeOpen(true)}>
-            Subscribe
-          </button>
-        )}
       </section>
 
       <NextUpCard
@@ -837,6 +860,13 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
               onVote={handleVote}
               onOpenMovie={onOpenMovie}
             />
+            {isAdmin && remainingMovies.length > 0 && (
+              <div className="sunday-action-row">
+                <button type="button" className="secondary-button" onClick={() => setRandomPickOpen(true)}>
+                  Randomly pick a movie
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <p className="empty-state">Nothing planned for this day yet.</p>
@@ -851,6 +881,14 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
         )}
       </section>
 
+      {icsFeedUrl && (
+        <section className="sunday-action-row">
+          <button type="button" className="secondary-button" onClick={() => setSubscribeOpen(true)}>
+            Subscribe
+          </button>
+        </section>
+      )}
+
       {editorTarget && (
         <EventEditorModal
           dateKey={editorTarget.dateKey}
@@ -864,6 +902,15 @@ export function WatchPlanner({ onOpenMovie }: WatchPlannerProps) {
       )}
 
       {subscribeOpen && icsFeedUrl && <SubscribeModal feedUrl={icsFeedUrl} onClose={() => setSubscribeOpen(false)} />}
+
+      {randomPickOpen && (
+        <RandomPickModal
+          candidates={remainingMovies}
+          voteCounts={voteCounts}
+          onPick={(movieId) => upsertMovieWatch({ movieId, scheduledFor: selectedDateKey, status: 'scheduled' })}
+          onClose={() => setRandomPickOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -7,7 +7,7 @@ interface SubscribeModalProps {
 }
 
 /**
- * A subscription URL, not a download link — most calendar apps intercept a
+ * A subscription URL, not a download link. Most calendar apps intercept a
  * webcal:// link and open their own "add subscription" dialog directly, which is
  * the one-click path; the copyable https:// link is the fallback for apps that
  * want it pasted in manually instead.
@@ -21,7 +21,7 @@ export function SubscribeModal({ feedUrl, onClose }: SubscribeModalProps) {
       await navigator.clipboard.writeText(feedUrl)
       setCopied(true)
     } catch {
-      // Clipboard access can be blocked (permissions, non-HTTPS context, etc.) —
+      // Clipboard access can be blocked (permissions, non-HTTPS context, etc.), so
       // the link is still right there to select and copy by hand.
     }
   }
@@ -38,10 +38,7 @@ export function SubscribeModal({ feedUrl, onClose }: SubscribeModalProps) {
         </div>
 
         <section className="modal-section">
-          <p className="modal-meta">
-            Add this as a calendar subscription in Google, Apple, or Outlook Calendar. It stays live and updates on its own —
-            no re-downloading when a movie night changes.
-          </p>
+          <p className="modal-meta">Movie nights and open votes update automatically, no re-downloading.</p>
           <div className="sunday-action-row">
             <a className="admin-form-submit" href={webcalUrl}>
               Open in Calendar app

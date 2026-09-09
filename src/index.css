@@ -903,17 +903,12 @@ h3 {
   color: var(--accent-dim);
 }
 
-.month-calendar-open,
 .month-calendar-count {
   color: var(--text-muted);
   font-size: 0.62rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.month-calendar-open {
-  margin-top: auto;
 }
 
 /* Single unified toolbar — sort control, view toggle, and/or search live here as one
@@ -1984,6 +1979,24 @@ h3 {
   align-self: flex-start;
 }
 
+/* .admin-form-submit is a <button> everywhere except SubscribeModal's "Open in
+   Calendar app" link — the base `button` reset above (padding, radius, cursor,
+   font-size, ...) only targets the button element, so the anchor needs its own
+   copy of that reset plus text-decoration: none to actually look like a button. */
+a.admin-form-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid var(--accent-solid);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  min-height: 2.25rem;
+  transition: border-color 0.12s ease, background-color 0.12s ease, opacity 0.12s ease;
+}
+
 .admin-form-submit:hover:not(:disabled) {
   background: var(--accent-solid-hover);
   border-color: var(--accent-solid-hover);
@@ -2016,7 +2029,8 @@ h3 {
   }
 
   .sunday-calendar-nav button,
-  .sunday-action-row button {
+  .sunday-action-row button,
+  .sunday-action-row a {
     width: 100%;
   }
 
